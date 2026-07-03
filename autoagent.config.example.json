@@ -1,0 +1,8 @@
+{
+  "workspace": "C:\\Users\\systran\\Desktop\\LanguageDetection",
+  "claude_command": "claude.cmd",
+  "codex_command": "codex.cmd",
+  "codex_sandbox": "workspace-write",
+  "codex_approval": "never",
+  "timeout_seconds": 3600
+}

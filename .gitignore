@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.env
+autoagent.config.json
+runs/*/
+!runs/.gitkeep
