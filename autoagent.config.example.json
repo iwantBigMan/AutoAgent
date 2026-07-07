@@ -4,5 +4,11 @@
   "codex_command": "codex.cmd",
   "codex_sandbox": "workspace-write",
   "codex_approval": "never",
-  "timeout_seconds": 3600
+  "timeout_seconds": 3600,
+  "claude_model": "sonnet",
+  "claude_high_risk_model": "opus",
+  "codex_model": "gpt-5.5",
+  "codex_reasoning_effort": "high",
+  "default_max_agent_calls_review": 5,
+  "default_max_agent_calls_implementation": 9
 }

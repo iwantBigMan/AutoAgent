@@ -15,6 +15,12 @@ class Config:
     codex_sandbox: str
     codex_approval: str
     timeout_seconds: int
+    claude_model: str
+    claude_high_risk_model: str
+    codex_model: str
+    codex_reasoning_effort: str
+    default_max_agent_calls_review: int
+    default_max_agent_calls_implementation: int
 
 
 def load_config(path: Path) -> Config:
@@ -35,4 +41,10 @@ def load_config(path: Path) -> Config:
         codex_sandbox=raw.get("codex_sandbox") or "workspace-write",
         codex_approval=raw.get("codex_approval") or "never",
         timeout_seconds=int(raw.get("timeout_seconds") or 3600),
+        claude_model=raw.get("claude_model") or "sonnet",
+        claude_high_risk_model=raw.get("claude_high_risk_model") or "opus",
+        codex_model=raw.get("codex_model") or "gpt-5.5",
+        codex_reasoning_effort=raw.get("codex_reasoning_effort") or "high",
+        default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
+        default_max_agent_calls_implementation=int(raw.get("default_max_agent_calls_implementation") or 9),
     )
