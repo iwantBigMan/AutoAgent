@@ -1,3 +1,10 @@
+"""routed 워크플로우 공용 헬퍼.
+
+- 승인 게이트: approval_required(판정) / block_for_human_approval / write_checkpoint.
+- 재개용 상태 저장(checkpoint.json), 구현 차단(block_implementation).
+- 모델·effort 선택: architecture_model_for / architecture_effort_for.
+- 종료 제어: stop_after. 평가·보고: run_evaluation / run_final_report.
+"""
 from __future__ import annotations
 
 import json
@@ -148,6 +155,32 @@ def architecture_model_for(config: Config, route: dict[str, Any], request: str) 
     if is_high_risk(route, request):
         return config.claude_high_risk_model
     return config.claude_model
+
+
+def architecture_effort_for(config: Config, route: dict[str, Any], request: str) -> str:
+    if is_high_risk(route, request):
+        return config.claude_high_risk_effort
+    return config.claude_effort
+
+
+def write_checkpoint(run_dir, *, request, config, route, args) -> None:
+    """게이트에서 정지하기 전에 재개(--resume)에 필요한 상태를 저장한다."""
+    checkpoint = {
+        "version": 1,
+        "stage": "awaiting_approval",
+        "request": request,
+        "workspace": str(config.workspace),
+        "config_path": args.config,
+        "route": route,
+        "artifacts": {
+            "context": "01_claude_context.md",
+            "architecture": "02_claude_architecture.md",
+            "validation": "03_codex_validation.md",
+        },
+        "max_review_rounds": args.max_review_rounds,
+        "max_agent_calls": args.max_agent_calls,
+    }
+    write_json(run_dir / "checkpoint.json", checkpoint)
 
 
 def approval_required(args: Namespace, route: dict[str, Any], request: str) -> bool:

@@ -1,81 +1,81 @@
-# Role
+# 역할
 
-You are Codex acting as the Evaluator in the AutoAgent routed workflow.
+당신은 AutoAgent routed 워크플로우에서 평가자 역할을 하는 Codex입니다.
 
-# Workspace
+# 작업공간
 
 {{WORKSPACE}}
 
-# Original User Request
+# 원본 사용자 요청
 
 {{REQUEST}}
 
-# Route
+# 라우트
 
 ```json
 {{ROUTE_JSON}}
 ```
 
-# Claude Context
+# Claude 컨텍스트
 
 {{CLAUDE_CONTEXT}}
 
-# Claude Architecture
+# Claude 아키텍처
 
 {{CLAUDE_ARCHITECTURE}}
 
-# Codex Validation
+# Codex 검증
 
 {{CODEX_VALIDATION}}
 
-# Implementation Result
+# 구현 결과
 
 {{IMPLEMENTATION_RESULT}}
 
-# Review Result
+# 리뷰 결과
 
 {{REVIEW_RESULT}}
 
-# Fix Result
+# 수정 결과
 
 {{FIX_RESULT}}
 
-# Final Review Result
+# 최종 리뷰 결과
 
 {{FINAL_REVIEW_RESULT}}
 
-# DB Safety Requirements
+# DB 안전 요구사항
 
-If `subtype` is `db`, explicitly evaluate:
-- data loss possibility
-- backward compatibility
-- migration upgrade/downgrade
-- rollback strategy
-- transaction boundary
-- locking/concurrency impact
-- production data impact
-- nullable/default/index/constraint declarations
-- Alembic revision consistency
-- repository/API contract impact
-- test or dry-run validation method
+`subtype`이 `db`이면 다음을 명시적으로 평가하세요:
+- 데이터 손실 가능성
+- 하위 호환성
+- 마이그레이션 upgrade/downgrade
+- 롤백 전략
+- 트랜잭션 경계
+- 잠금/동시성 영향
+- 운영 데이터 영향
+- nullable/default/index/constraint 선언
+- Alembic 리비전 일관성
+- repository/API 계약 영향
+- 테스트 또는 dry-run 검증 방법
 
-# Task
+# 작업
 
-Evaluate whether the original request is complete.
+원본 요청이 완료되었는지 평가하세요.
 
-Start with exactly one line:
+정확히 다음 한 줄로 시작하세요:
 
 `EVALUATION_STATUS: passed`
 
-or
+또는
 
 `EVALUATION_STATUS: needs_changes`
 
-or
+또는
 
 `EVALUATION_STATUS: blocked`
 
-Then return this structure as closely as possible:
+그다음 이 구조를 최대한 그대로 반환하세요:
 
 ```json
 {
@@ -95,7 +95,7 @@ Then return this structure as closely as possible:
 }
 ```
 
-Rules:
-- Do not modify files.
-- Do not include secrets.
-- Judge completion against the original request, not against extra wishes.
+규칙:
+- 파일을 수정하지 마세요.
+- 비밀정보를 포함하지 마세요.
+- 완료 여부는 추가 희망사항이 아니라 원본 요청 기준으로 판단하세요.

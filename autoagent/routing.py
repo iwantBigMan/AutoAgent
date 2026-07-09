@@ -1,8 +1,15 @@
+"""키워드 기반 라우팅.
+
+요청 텍스트의 키워드 점수로 task_type(backend/frontend/docs/review)·subtype·
+risk_level을 정하고, 구현자/리뷰어 모델(구현자와 반대)을 선택한다.
+DB 관련 용어가 있으면 subtype=db·risk_level=high로 고정(승인 게이트 대상).
+"""
 from __future__ import annotations
 
 from typing import Any
 
 
+# 아래 용어 목록은 요청 텍스트를 소문자화해 부분일치로 점수를 매기는 데 쓰인다.
 TASK_TYPES = {"backend", "frontend", "docs", "review"}
 DB_TERMS = [
     "db",
@@ -60,6 +67,12 @@ CODEX_IMPLEMENTER_TERMS = [
 
 
 def route_task(task_type: str, request: str, requested_implementer: str = "auto") -> dict[str, Any]:
+    """요청을 라우팅해 route dict를 만든다.
+
+    task_type이 auto면 키워드 점수로 backend/frontend/docs를 고르고, 명시되면 그대로 쓴다.
+    DB 용어가 있으면 subtype=db·risk_level=high, high-risk 용어가 있으면 risk_level=high.
+    구현자/리뷰어는 choose_implementer가 정한다(리뷰어는 항상 구현자와 반대 모델).
+    """
     lowered = request.lower()
     db_score = sum(1 for term in DB_TERMS if term in lowered)
     high_risk_score = sum(1 for term in HIGH_RISK_TERMS if term in lowered)
@@ -185,6 +198,11 @@ def choose_implementer(
     subtype: str,
     request: str,
 ) -> tuple[str, str, str]:
+    """(구현자, 리뷰어, 사유)를 반환. 리뷰어는 항상 구현자와 반대 모델이다.
+
+    명시 지정이 우선. auto면 frontend=codex, backend=claude 기본이며,
+    db가 아닌 backend에서 test/build/diff-fix 성격이면 codex로 넘긴다.
+    """
     if requested_implementer == "claude":
         return "claude", "codex", "Implementer explicitly set to Claude."
     if requested_implementer == "codex":

@@ -1,53 +1,53 @@
-# Role
+# 역할
 
-You are Codex reviewing a frontend implementation.
+당신은 frontend 구현을 리뷰하는 Codex입니다.
 
-# Workspace
+# 작업공간
 
 {{WORKSPACE}}
 
-# Original User Request
+# 원본 사용자 요청
 
 {{REQUEST}}
 
-# Claude Context
+# Claude 컨텍스트
 
 {{CLAUDE_CONTEXT}}
 
-# Claude Architecture
+# Claude 아키텍처
 
 {{CLAUDE_ARCHITECTURE}}
 
-# Codex Validation
+# Codex 검증
 
 {{CODEX_VALIDATION}}
 
-# Implementation Result
+# 구현 결과
 
 {{IMPLEMENTATION_RESULT}}
 
-# Task
+# 작업
 
-Review the frontend implementation for correctness, regressions, missing states, accessibility, responsive behavior, and unsafe scope changes.
+정확성, 회귀, 누락된 상태, 접근성, 반응형 동작, 안전하지 않은 범위 변경 관점에서 frontend 구현을 리뷰하세요.
 
-Start your response with exactly one line:
+응답의 첫 줄은 정확히 다음 한 줄로 시작하세요:
 
 `REVIEW_STATUS: approved`
 
-or
+또는
 
 `REVIEW_STATUS: needs_changes`
 
-or
+또는
 
 `REVIEW_STATUS: blocked`
 
-Then return:
-- findings ordered by severity
-- files or areas that need follow-up
-- validation sufficiency
-- concise next action
+그다음 반환하세요:
+- 심각도 순으로 정렬된 지적사항
+- 후속 조치가 필요한 파일이나 영역
+- 검증 충분성
+- 간결한 다음 조치
 
-Rules:
-- Do not modify files.
-- Do not suggest broad overengineering.
+규칙:
+- 파일을 수정하지 마세요.
+- 광범위한 오버엔지니어링을 제안하지 마세요.

@@ -1,3 +1,8 @@
+"""docs/review·read-only 라우트: 구현 없이 평가·최종보고만 수행한다.
+
+구현/리뷰/수정 단계가 없으므로 해당 자리에 "실행 안 함" 표시를 채워
+평가(run_evaluation)와 최종 보고(run_final_report)만 돌린다.
+"""
 from __future__ import annotations
 
 from argparse import Namespace

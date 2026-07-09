@@ -1,3 +1,8 @@
+"""CLI 진입점(argparse) + 워크플로우 분기.
+
+인자를 파싱하고 config를 로드한 뒤, --resume면 재개 경로로, 아니면 run 폴더를
+만들고 simple/routed/decompose 워크플로우 중 하나로 분기한다.
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,11 +13,12 @@ from pathlib import Path
 from autoagent.artifacts import DEFAULT_CONFIG, make_run_dir, read_text, write_metadata, write_text
 from autoagent.config import load_config
 from autoagent.workflows.decompose import run_decompose_workflow
-from autoagent.workflows.routed import run_routed_workflow
+from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
 from autoagent.workflows.simple import run_simple_workflow
 
 
 def load_request(args: argparse.Namespace) -> str:
+    """요청 텍스트를 --request-file > --request > stdin 순으로 읽는다. 없으면 종료."""
     if args.request_file:
         return read_text(Path(args.request_file))
     if args.request:
@@ -68,6 +74,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-only", action="store_true", help="Run Claude planning only")
     parser.add_argument("--skip-review", action="store_true", help="Skip final Claude review")
     parser.add_argument("--dry-run", action="store_true", help="Render prompts without calling CLIs")
+    parser.add_argument(
+        "--resume",
+        help="Resume a gated routed run from its run directory; loads checkpoint.json and continues into implementation",
+    )
     return parser
 
 
@@ -76,6 +86,13 @@ def main() -> int:
     config = load_config(Path(args.config))
     if args.workspace:
         config.workspace = Path(args.workspace)
+
+    # --resume는 게이트에서 정지했던 run을 이어받아 구현 단계로 재개한다.
+    # 새 요청을 받는 게 아니므로 --request/--request-file과 함께 쓸 수 없다.
+    if args.resume:
+        if args.request or args.request_file:
+            raise SystemExit("--resume cannot be combined with --request/--request-file.")
+        return resume_routed_workflow(args, config)
 
     if not config.workspace.exists():
         raise SystemExit(f"Workspace does not exist: {config.workspace}")
@@ -104,6 +121,8 @@ def main() -> int:
             "dry_run": args.dry_run,
             "claude_model": config.claude_model,
             "claude_high_risk_model": config.claude_high_risk_model,
+            "claude_effort": config.claude_effort,
+            "claude_high_risk_effort": config.claude_high_risk_effort,
             "codex_model": config.codex_model,
             "codex_reasoning_effort": config.codex_reasoning_effort,
         },

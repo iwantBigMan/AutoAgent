@@ -1,47 +1,47 @@
-﻿# AutoAgent
+# AutoAgent
 
-Local harness for running Claude Code CLI and Codex CLI together.
+Claude Code CLI와 Codex CLI를 함께 구동하는 로컬 하네스입니다.
 
-The default workflow remains:
+기본 워크플로우:
 
 ```text
 Claude plan -> Codex execute -> Claude review
 ```
 
-The routed workflow adds role-based routing:
+routed 워크플로우는 역할 기반 라우팅을 더합니다:
 
 ```text
 Claude context -> Claude architecture -> Codex validation -> route -> implementation/review/evaluation/final report
 ```
 
-The decompose workflow splits large requests into a reviewed task graph without implementation:
+decompose 워크플로우는 대규모 요청을 구현 없이 리뷰된 task graph로 분해합니다:
 
 ```text
-Claude decomposition -> Codex plan review -> task_graph.json -> human approval required
+Claude decomposition -> Codex plan review -> task_graph.json -> 인간 승인 필요
 ```
 
-Routed roles:
+routed 역할:
 
-- Context Agent: clarifies the request and boundaries
-- Architect: Claude defines files, layers, contracts, non-goals, and risk controls
-- Implementer: selected by `--implementer auto|claude|codex`
-- Reviewer: the opposite model from the implementer
-- Evaluator: Codex decides whether the request is complete
-- Reporter: Claude writes the final report
+- Context Agent: 요청과 경계를 명확히 함
+- Architect: Claude가 파일·계층·계약·비목표·위험 통제를 정의
+- Implementer: `--implementer auto|claude|codex`로 선택
+- Reviewer: 구현자와 반대 모델
+- Evaluator: Codex가 요청 완료 여부를 판단
+- Reporter: Claude가 최종 보고서 작성
 
-## Requirements
+## 요구사항
 
-- `claude.cmd` available on PATH
-- `codex.cmd` available on PATH
+- PATH에 `claude.cmd`
+- PATH에 `codex.cmd`
 - Python 3
 
-Default workspace:
+기본 작업공간:
 
 ```text
 C:\Users\systran\Desktop\LanguageDetection
 ```
 
-## Layout
+## 구조
 
 ```text
 AutoAgent/
@@ -71,59 +71,59 @@ AutoAgent/
 +-- README.md
 ```
 
-## Simple Workflow
+## Simple 워크플로우
 
-Plan only:
+계획만:
 
 ```powershell
-python .\run.py --plan-only --request "Review the current structure and list risks only."
+python .\run.py --plan-only --request "현재 구조를 리뷰하고 위험만 나열하세요."
 ```
 
-Full simple loop:
+전체 simple 루프:
 
 ```powershell
-python .\run.py --request "Review the project without modifying files."
+python .\run.py --request "파일을 수정하지 말고 프로젝트를 리뷰하세요."
 ```
 
 Dry run:
 
 ```powershell
-python .\run.py --dry-run --request "Prompt rendering test"
+python .\run.py --dry-run --request "프롬프트 렌더링 테스트"
 ```
 
-## Routed Workflow
+## Routed 워크플로우
 
-Backend route:
+Backend 라우트:
 
 ```powershell
-python .\run.py --workflow routed --task-type backend --request "Implement the backend change."
+python .\run.py --workflow routed --task-type backend --request "backend 변경을 구현하세요."
 ```
 
-Frontend route:
+Frontend 라우트:
 
 ```powershell
-python .\run.py --workflow routed --task-type frontend --request "Implement the frontend change."
+python .\run.py --workflow routed --task-type frontend --request "frontend 변경을 구현하세요."
 ```
 
-Read-only docs/review route:
+읽기 전용 docs/review 라우트:
 
 ```powershell
-python .\run.py --workflow routed --task-type docs --read-only --request "Do not modify files. Review risks only."
+python .\run.py --workflow routed --task-type docs --read-only --request "파일을 수정하지 마세요. 위험만 리뷰하세요."
 ```
 
-Auto route:
+Auto 라우트:
 
 ```powershell
-python .\run.py --workflow routed --task-type auto --request "Review FastAPI migration risks."
+python .\run.py --workflow routed --task-type auto --request "FastAPI 마이그레이션 위험을 리뷰하세요."
 ```
 
-DB subtype route:
+DB subtype 라우트:
 
 ```powershell
-python .\run.py --dry-run --workflow routed --task-type backend --request "DB migration?쇰줈 translation_pairs??unique constraint瑜?異붽??댁쨾"
+python .\run.py --dry-run --workflow routed --task-type backend --request "DB migration으로 translation_pairs에 unique constraint를 추가해줘"
 ```
 
-DB-related requests are still `backend`, but `route.json` adds:
+DB 관련 요청도 여전히 `backend`이지만, `route.json`에 다음이 추가됩니다:
 
 ```json
 {
@@ -135,9 +135,9 @@ DB-related requests are still `backend`, but `route.json` adds:
 }
 ```
 
-DB subtype prompts include data loss, compatibility, migration upgrade/downgrade, rollback, transaction, locking, nullable/default/index/constraint, Alembic, repository/API contract, and validation concerns.
+DB subtype 프롬프트는 데이터 손실, 호환성, 마이그레이션 upgrade/downgrade, 롤백, 트랜잭션, 잠금, nullable/default/index/constraint, Alembic, repository/API 계약, 검증 관련 사항을 포함합니다.
 
-## Routed Options
+## Routed 옵션
 
 - `--workflow simple|routed`
 - `--workflow decompose`
@@ -148,60 +148,66 @@ DB subtype prompts include data loss, compatibility, migration upgrade/downgrade
 - `--max-agent-calls 0`
 - `--stop-after none|context|architecture|validation|implementation|review|final-review|evaluation|report`
 - `--require-human-approval`
+- `--resume <run_dir>` (게이트에서 정지한 run을 사람이 검토·승인한 뒤 구현 단계부터 재개)
 
-Defaults:
+기본값:
 
 - `--workflow simple`
 - `--task-type auto`
 - `--implementer auto`
 - `--max-review-rounds 1`
-- `--max-agent-calls 0` means unlimited
+- `--max-agent-calls 0`은 무제한
 - `--stop-after none`
 
-## Model Policy
+## 모델 정책
 
-Default model placement:
+기본 모델 배치:
 
 ```text
-Claude default: sonnet
+Claude 기본: sonnet
 Claude high-risk: opus
+Claude effort 기본: high
+Claude high-risk effort: xhigh
 Codex: gpt-5.5
 Codex reasoning effort: high
 ```
 
-Role placement:
+역할 배치:
 
 ```text
 Context Agent: Claude sonnet
 Architect: Claude sonnet
-DB/high-risk Architect: Claude opus
-Implementer: selected by --implementer auto|claude|codex
-Reviewer: opposite model from the implementer
+DB/high-risk Architect: Claude opus (effort xhigh)
+Implementer: --implementer auto|claude|codex로 선택
+DB/high-risk Implementer(claude): Claude opus (effort xhigh)
+Reviewer: 구현자와 반대 모델
 Evaluator: Codex gpt-5.5
 Reporter: Claude sonnet
 ```
 
-Implementer selection:
+`--effort`(headless `claude -p`)는 low/medium/high/xhigh/max만 받습니다("ultracode"는 대화형 전용이라 무시됨). high-risk에서 opus에 xhigh를 부여하는 것이 "ultracode"의 추론 강도에 해당합니다. effort 값은 config의 `claude_effort`/`claude_high_risk_effort`로 조정합니다.
+
+Implementer 선택:
 
 ```text
 --implementer claude
-  Claude implements and Codex reviews.
+  Claude가 구현하고 Codex가 리뷰.
 
 --implementer codex
-  Codex implements and Claude reviews.
+  Codex가 구현하고 Claude가 리뷰.
 
 --implementer auto
-  Frontend defaults to Codex.
-  Backend defaults to Claude.
-  Backend test/build/lint/diff-fix work can route to Codex.
-  Docs/review/read-only routes do not implement.
+  Frontend는 기본 Codex.
+  Backend는 기본 Claude.
+  Backend의 test/build/lint/diff-fix 작업은 Codex로 라우팅될 수 있음.
+  Docs/review/read-only 라우트는 구현하지 않음.
 ```
 
-`codex_reasoning_effort` is stored in config for reproducibility. The harness does not inject it as a `codex exec -c` override because CLI compatibility can vary; set it in `~/.codex/config.toml` when needed.
+`codex_reasoning_effort`는 재현성을 위해 config에 저장됩니다. CLI 호환성이 달라질 수 있어 하네스가 `codex exec -c` 오버라이드로 주입하지는 않습니다. 필요하면 `~/.codex/config.toml`에 설정하세요.
 
-## Loop Limits
+## 루프 제한
 
-Recommended review/docs run:
+권장 review/docs 실행:
 
 ```powershell
 python .\run.py `
@@ -210,10 +216,10 @@ python .\run.py `
   --read-only `
   --max-review-rounds 0 `
   --max-agent-calls 5 `
-  --request "Review project structure and risks only."
+  --request "프로젝트 구조와 위험만 리뷰하세요."
 ```
 
-Recommended implementation run:
+권장 구현 실행:
 
 ```powershell
 python .\run.py `
@@ -222,10 +228,10 @@ python .\run.py `
   --implementer claude `
   --max-review-rounds 1 `
   --max-agent-calls 9 `
-  --request "Implement the backend feature."
+  --request "backend 기능을 구현하세요."
 ```
 
-Backend implementation delegated to Codex:
+Codex에 위임하는 backend 구현:
 
 ```powershell
 python .\run.py `
@@ -234,10 +240,10 @@ python .\run.py `
   --implementer codex `
   --max-review-rounds 1 `
   --max-agent-calls 9 `
-  --request "Fix the backend code based on failing pytest output."
+  --request "실패한 pytest 출력을 기반으로 backend 코드를 고치세요."
 ```
 
-Automatic implementer selection:
+자동 implementer 선택:
 
 ```powershell
 python .\run.py `
@@ -246,53 +252,56 @@ python .\run.py `
   --implementer auto `
   --max-review-rounds 1 `
   --max-agent-calls 9 `
-  --request "Request text"
+  --request "요청 텍스트"
 ```
 
-`--max-agent-calls` limits the total number of Claude/Codex subprocess calls. Dry runs do not count as agent calls. If the budget is exhausted before the next call, the run writes `stopped_by_budget.md` and exits with code 0.
+`--max-review-rounds`는 리뷰-수정 반복 횟수입니다(리뷰가 통과하면 조기 종료). `0`이면 리뷰/수정을 건너뜁니다.
 
-`--stop-after` stops after a named stage completes and writes `stopped_after.md`.
+`--max-agent-calls`는 Claude/Codex 서브프로세스 총 호출 수를 제한합니다. Dry run은 호출 수에 포함되지 않습니다. 다음 호출 전에 예산이 소진되면 `stopped_by_budget.md`를 쓰고 종료 코드 0으로 끝납니다.
 
-## Approval Gate
+`--stop-after`는 지정한 단계 완료 후 정지하며 `stopped_after.md`를 씁니다.
 
-Implementation runs stop before code changes when any of these are true:
+## 승인 게이트
 
-- `--require-human-approval` is set
-- `route.json` has `"risk_level": "high"`
-- `route.json` has `"subtype": "db"`
-- the request strongly mentions high-risk terms such as `migration`, `auth`, `payment`, `production`, `backfill`, or `rollback`
+구현 실행은 다음 중 하나라도 참이면 코드 변경 전에 정지합니다:
 
-The gate writes:
+- `--require-human-approval`이 설정됨
+- `route.json`의 `"risk_level": "high"`
+- `route.json`의 `"subtype": "db"`
+- 요청이 `migration`, `auth`, `payment`, `production`, `backfill`, `rollback` 같은 high-risk 용어를 강하게 언급함
+
+게이트는 다음을 씁니다:
 
 ```text
+checkpoint.json
 approval_required.md
 approval_status.json
 final_report.md
 ```
 
-This version only implements the safe stop. Resuming an approved run is intentionally left for a later change.
+사람이 계획 산출물(`01_claude_context.md`·`02_claude_architecture.md`·`03_codex_validation.md`)을 검토한 뒤, `--resume <run_dir>`로 재개하면 preamble을 다시 돌리지 않고 구현 단계부터 이어갑니다. 재개 실행 자체가 사람의 승인 행위입니다. 게이트를 건너뛰는 블랭킷 플래그(예: `--approve`)는 두지 않습니다 — 그런 스위치의 유일한 효과가 "반드시 승인해야 하는 high-risk/db 케이스의 승인을 생략"하는 것이라 이 하네스의 철학과 충돌하기 때문입니다.
 
-## Safety
+## 안전
 
-- `--workflow simple` preserves the previous behavior.
-- `--workflow routed` uses the new role-based flow.
-- `--workflow decompose` never runs implementation steps.
-- `--read-only` forces Codex sandbox to `read-only` and skips implementation steps.
-- Decompose runs Claude with `--permission-mode plan` and Codex with `--sandbox read-only`.
-- Implementation routes are blocked if the target workspace does not have a valid Git HEAD baseline.
-- The harness never commits, pushes, or uploads automatically.
+- `--workflow simple`은 기존 동작을 유지합니다.
+- `--workflow routed`는 새 역할 기반 흐름을 사용합니다.
+- `--workflow decompose`는 구현 단계를 절대 실행하지 않습니다.
+- `--read-only`는 Codex 샌드박스를 `read-only`로 강제하고 구현 단계를 건너뜁니다.
+- Decompose는 Claude를 `--permission-mode plan`으로, Codex를 `--sandbox read-only`로 실행합니다.
+- 대상 작업공간에 유효한 Git HEAD 베이스라인이 없으면 구현 라우트가 차단됩니다.
+- 하네스는 자동으로 커밋/푸시/업로드하지 않습니다.
 
-## Decompose Workflow
+## Decompose 워크플로우
 
-Use decompose for large requests that should not be implemented directly.
+직접 구현하면 안 되는 대규모 요청에 decompose를 사용하세요.
 
 ```powershell
 python .\run.py `
   --workflow decompose `
-  --request "Split the src-layout migration into a safe task graph."
+  --request "src-layout 마이그레이션을 안전한 task graph로 분해하세요."
 ```
 
-Decompose writes:
+Decompose는 다음을 씁니다:
 
 ```text
 00_request.md
@@ -303,7 +312,7 @@ approval_required.md
 final_report.md
 ```
 
-Task graph schema:
+Task graph 스키마(필드명·enum값은 코드가 파싱하므로 영문 유지):
 
 ```json
 {
@@ -331,17 +340,17 @@ Task graph schema:
 }
 ```
 
-This version stops after task graph approval. Task execution from a graph is a later workflow.
+현재 버전은 task graph 승인 후 정지합니다. 그래프로부터의 task 실행은 후속 워크플로우입니다(설계: `docs/specs/2026-07-09-task-graph-execution-design.md`).
 
-## Output
+## 출력
 
-Each run writes artifacts under:
+각 실행은 다음 아래에 산출물을 씁니다:
 
 ```text
 runs/YYYYMMDD_HHMMSS/
 ```
 
-Important routed artifacts:
+주요 routed 산출물:
 
 ```text
 00_request.md
@@ -353,34 +362,27 @@ final_evaluation.md
 final_report.md
 ```
 
-Backend routes may also create:
+리뷰-수정 반복 라운드는 `_rN` 접미사로 남습니다(예: `05_codex_backend_review_r1.md`). Backend 라우트는 다음도 생성할 수 있습니다:
 
 ```text
 04_claude_backend_impl.md
-05_codex_backend_review.md
-06_claude_backend_fix.md
-04_codex_backend_impl.md
-05_claude_backend_review.md
-06_codex_backend_fix.md
+05_codex_backend_review_r1.md
+06_claude_backend_fix_r1.md
 07_codex_final_review.md
 08_codex_evaluation.md
 ```
 
-Frontend routes may also create:
+Frontend 라우트는 다음도 생성할 수 있습니다:
 
 ```text
 04_codex_frontend_impl.md
-05_claude_frontend_review.md
-06_codex_frontend_fix.md
-04_claude_frontend_impl.md
-05_codex_frontend_review.md
-06_claude_frontend_fix.md
+05_claude_frontend_review_r1.md
+06_codex_frontend_fix_r1.md
 07_codex_final_review.md
-07_claude_final_review.md
 08_codex_evaluation.md
 ```
 
-Docs/review/read-only routes may also create:
+Docs/review/read-only 라우트는 다음도 생성할 수 있습니다:
 
 ```text
 04_codex_evaluation.md

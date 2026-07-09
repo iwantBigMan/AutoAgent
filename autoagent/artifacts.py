@@ -1,3 +1,10 @@
+"""산출물·프롬프트·JSON 입출력 유틸.
+
+- read_text/write_text/write_json: UTF-8 파일 입출력.
+- render_template + PROMPT_ALIASES: 프롬프트 템플릿의 {{KEY}} 치환.
+- make_run_dir: runs/타임스탬프 실행 폴더 생성.
+- extract_json_block: 텍스트에서 task_graph JSON 블록 추출.
+"""
 from __future__ import annotations
 
 import json
@@ -50,6 +57,12 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def render_template(name: str, values: dict[str, str]) -> str:
+    """프롬프트 템플릿을 읽어 {{KEY}}를 values로 치환한다.
+
+    단순 문자열 치환이라 values에 없는 placeholder는 {{KEY}} 그대로 남고,
+    템플릿에 없는 key는 무시된다(무해). 그래서 라운드 피드백 같은 선택 값을
+    빈 문자열로 넘겨도 안전하다.
+    """
     template = read_text(prompt_path(name))
     for key, value in values.items():
         template = template.replace("{{" + key + "}}", value)
@@ -79,6 +92,12 @@ def write_metadata(path: Path, data: dict[str, Any]) -> None:
 
 
 def extract_json_block(text: str) -> dict[str, Any]:
+    """분해 결과 텍스트에서 task_graph JSON을 추출한다.
+
+    1) `TASK_GRAPH_JSON` 마커 뒤 코드펜스를 우선 찾고,
+    2) 없으면 tasks 키를 가진 아무 JSON 펜스,
+    3) 그래도 없으면 첫 { ~ 마지막 } 범위를 시도한다. 모두 실패하면 예외.
+    """
     task_graph_match = re.search(
         r"TASK_GRAPH_JSON\s*```(?:json)?\s*(\{.*?\})\s*```",
         text,
