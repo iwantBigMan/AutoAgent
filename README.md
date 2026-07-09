@@ -388,3 +388,22 @@ Docs/review/read-only 라우트는 다음도 생성할 수 있습니다:
 04_codex_evaluation.md
 05_claude_final_report.md
 ```
+
+## `/aa` 커맨드 (Claude CLI)
+
+Claude Code 세션 안에서 AutoAgent를 돌리고, 게이트에 걸리면 CLI에서 승인해 바로 구현까지 이어가는 단일 커맨드입니다.
+
+설치 (글로벌, 모든 프로젝트에서 사용):
+
+```powershell
+Copy-Item C:\Users\systran\Desktop\AutoAgent\commands\aa.md $HOME\.claude\commands\aa.md
+```
+
+사용:
+
+```text
+/aa <요청>                 # auto 라우팅
+/aa backend <요청>         # 타입 강제 (auto|backend|frontend|docs|review)
+```
+
+흐름: 현재 프로젝트(`--workspace .`)에 routed 워크플로우 실행 → high-risk/db면 게이트에서 계획·위험을 요약해 CLI에서 승인 질의 → 승인 시 `--resume`로 구현 단계 진입 → 구현 산출물 + `git diff --stat` 요약. 하네스는 자동 커밋/푸시하지 않으므로 diff는 사람이 검토합니다. 저위험 변경은 게이트 없이 바로 진행됩니다.
