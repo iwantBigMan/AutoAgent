@@ -34,24 +34,41 @@ def block_implementation(run_dir: Path, git_message: str) -> int:
     return 0
 
 
+def resume_command_for(run_dir: Path) -> str:
+    """게이트에서 정지한 run을 구현 단계로 이어가는 표준 재개 명령 문자열.
+
+    run_dir은 절대경로(ROOT/runs/<stamp>)이므로 run.py도 그 위치에서 도출한다.
+    어느 cwd에서든 그대로 붙여넣어 실행할 수 있게 절대경로를 쌍따옴표로 감싼다.
+    --resume는 checkpoint.json에서 workspace를 복원하므로 --workspace가 필요 없다.
+    """
+    run_py = run_dir.parent.parent / "run.py"
+    return f'python "{run_py}" --resume "{run_dir}"'
+
+
 def block_for_human_approval(run_dir: Path, route: dict[str, Any]) -> int:
     reason = "High-risk implementation requires human approval before code changes."
+    resume_command = resume_command_for(run_dir)
     status = {
         "status": "waiting_for_human_approval",
         "approved": False,
         "required": True,
         "reason": reason,
+        "run_dir": str(run_dir),
+        "resume_command": resume_command,
     }
     write_json(run_dir / "approval_status.json", status)
     write_text(
         run_dir / "approval_required.md",
         "# Human Approval Required\n\n"
         f"{reason}\n\n"
-        "Review these artifacts before running an implementation command:\n\n"
+        "Review these artifacts before approving:\n\n"
         "- 01_claude_context.md\n"
         "- 02_claude_architecture.md\n"
         "- 03_codex_validation.md\n"
         "- route.json\n\n"
+        "To approve and continue into implementation, run:\n\n"
+        f"```powershell\n{resume_command}\n```\n\n"
+        "Running that resume command IS the act of approval.\n\n"
         "Route:\n\n"
         f"```json\n{json.dumps(route, ensure_ascii=False, indent=2)}\n```\n",
     )
@@ -59,8 +76,14 @@ def block_for_human_approval(run_dir: Path, route: dict[str, Any]) -> int:
         run_dir / "final_report.md",
         "# Waiting for Human Approval\n\n"
         f"{reason}\n\n"
-        "No implementation step was run.\n",
+        "No implementation step was run.\n\n"
+        f"Resume with:\n\n```powershell\n{resume_command}\n```\n",
     )
+    # 파싱 가능한 재개 핸드오프: 구동 측(사람 또는 Claude CLI 커맨드)이 어떤 라우트든
+    # 동일한 형식으로 run_dir/재개 명령을 안정적으로 집도록 stdout에 고정 라인을 찍는다.
+    print("ROUTED_STATUS: waiting_for_human_approval")
+    print(f"RUN_DIR: {run_dir}")
+    print(f"RESUME_COMMAND: {resume_command}")
     print(f"Routed run waiting for human approval: {run_dir}")
     return 0
 
