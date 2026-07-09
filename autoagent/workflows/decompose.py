@@ -1,3 +1,9 @@
+"""decompose 워크플로우.
+
+대규모 요청을 task_graph로 분해(claude) -> 계획 리뷰(codex) -> 승인 대기에서 정지한다.
+구현은 절대 하지 않는다. task_graph.json과 승인 안내·최종 리포트만 남긴다.
+(승인된 그래프의 순차 실행은 후속 워크플로우 — docs/specs 참조.)
+"""
 from __future__ import annotations
 
 import json
@@ -11,6 +17,7 @@ from autoagent.runner import claude_command, codex_exec_command, require_command
 
 
 def run_decompose_workflow(args: Namespace, config: Config, request: str, run_dir: Path) -> int:
+    """요청을 분해해 task_graph를 만들고 codex 리뷰까지 한 뒤 승인 대기 상태로 정지한다."""
     values = {
         "REQUEST": request,
         "WORKSPACE": str(config.workspace),

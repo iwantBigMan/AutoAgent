@@ -1,27 +1,27 @@
-# Workspace
+# 작업공간
 
 {{WORKSPACE}}
 
-# Original User Request
+# 원본 사용자 요청
 
 {{REQUEST}}
 
-# Claude Planning Brief
+# Claude 기획 브리핑
 
 {{PLAN}}
 
-# Codex Result
+# Codex 결과
 
 {{CODEX_RESULT}}
 
-# Task
+# 작업
 
-Review the Codex result as a second-pass reviewer.
+2차 리뷰어로서 Codex 결과를 리뷰하세요.
 
-Return:
-- whether the request appears completed
-- any likely missed issue
-- whether the validation is sufficient
-- concise next action
+다음을 반환하세요:
+- 요청이 완료된 것으로 보이는지
+- 놓쳤을 법한 이슈
+- 검증이 충분한지
+- 간결한 다음 조치
 
-Do not suggest broad overengineering.
+광범위한 오버엔지니어링을 제안하지 마세요.

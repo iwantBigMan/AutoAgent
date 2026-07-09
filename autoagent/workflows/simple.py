@@ -1,3 +1,8 @@
+"""simple 워크플로우: Claude plan -> Codex execute -> Claude review.
+
+라우팅·승인 게이트 없이 세 단계를 선형 실행한다. --plan-only/--skip-review로
+중간에 멈출 수 있고, 예산 소진 시 안전 종료한다.
+"""
 from __future__ import annotations
 
 from argparse import Namespace

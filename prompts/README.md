@@ -1,6 +1,6 @@
-# Prompt Layout
+# 프롬프트 구조
 
-Prompts are grouped by workflow and role.
+프롬프트는 워크플로우와 역할별로 묶여 있습니다.
 
 ```text
 prompts/
@@ -36,4 +36,6 @@ prompts/
       codex_evaluator.md
 ```
 
-The code still supports the old flat prompt names through aliases in `autoagent/artifacts.py`.
+코드는 `autoagent/artifacts.py`의 별칭(alias)을 통해 옛 평면 프롬프트 이름도 여전히 지원합니다.
+
+참고: 프롬프트 본문 설명은 한국어이지만, 코드가 파싱하는 토큰은 영문 그대로 유지됩니다 — `{{...}}` placeholder 전부, 그리고 `REVIEW_STATUS:` / `IMPLEMENTATION_STATUS:` / `FIX_STATUS:` / `FINAL_STATUS:` / `EVALUATION_STATUS:` / `PLAN_REVIEW_STATUS:` / `TASK_GRAPH_JSON` 마커.

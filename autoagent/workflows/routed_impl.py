@@ -1,3 +1,9 @@
+"""routed 구현 라우트.
+
+구현(04) -> 리뷰-수정 반복(05/06, max_review_rounds, 통과 시 조기 종료) ->
+최종리뷰(07) -> 평가(08) -> 최종보고(09). 리뷰어는 항상 구현자와 반대 모델이고,
+high-risk backend를 claude(opus)로 구현/수정할 때는 effort xhigh를 쓴다.
+"""
 from __future__ import annotations
 
 from argparse import Namespace
@@ -20,6 +26,7 @@ def run_implementation_route(
     budget: AgentCallBudget,
     run_dir: Path,
 ) -> int:
+    # 라우트가 정한 구현자/리뷰어(서로 반대 모델)로 구현 단계를 수행한다.
     task_type = route["task_type"]
     implementation_agent = route["implementation_agent"]
     review_agent = route["review_agent"]
@@ -42,41 +49,58 @@ def run_implementation_route(
     if stop_after(args, run_dir, "implementation"):
         return 0
 
-    review = run_role_step(
-        args=args,
-        config=config,
-        run_dir=run_dir,
-        budget=budget,
-        agent=review_agent,
-        name=f"05_{review_agent}_{task_type}_review",
-        prompt_name=f"{review_agent}_{task_type}_review.md",
-        prompt_values={**common, "IMPLEMENTATION_RESULT": implementation},
-        next_step="review",
-        dry_output=f"[dry-run: {review_agent} {task_type} review output]",
-        route=route,
-        request=request,
-        mutating=False,
-    )
-    if stop_after(args, run_dir, "review"):
-        return 0
-
+    # 리뷰-수정을 max_review_rounds만큼 반복한다. 리뷰가 통과하면 조기 종료하고,
+    # 소진되면 마지막 수정본을 재검증 없이 다음 단계로 넘긴다(spec 3.4).
+    rounds = max(args.max_review_rounds, 0)
+    current_impl = implementation
+    review = "Review skipped (max_review_rounds=0)."
     fix = "No fix step was run."
-    if args.max_review_rounds > 0 and review_needs_changes(review):
+    resolved = rounds == 0
+    for r in range(1, rounds + 1):
+        review = run_role_step(
+            args=args,
+            config=config,
+            run_dir=run_dir,
+            budget=budget,
+            agent=review_agent,
+            name=f"05_{review_agent}_{task_type}_review_r{r}",
+            prompt_name=f"{review_agent}_{task_type}_review.md",
+            prompt_values={**common, "IMPLEMENTATION_RESULT": current_impl},
+            next_step="review",
+            dry_output=f"[dry-run: {review_agent} {task_type} review output]",
+            route=route,
+            request=request,
+            mutating=False,
+        )
+        if stop_after(args, run_dir, "review"):
+            return 0
+        if not review_needs_changes(review):
+            resolved = True
+            break
         fix = run_role_step(
             args=args,
             config=config,
             run_dir=run_dir,
             budget=budget,
             agent=implementation_agent,
-            name=f"06_{implementation_agent}_{task_type}_fix",
+            name=f"06_{implementation_agent}_{task_type}_fix_r{r}",
             prompt_name=f"{implementation_agent}_{task_type}_fix.md",
-            prompt_values={**common, "IMPLEMENTATION_RESULT": implementation, "REVIEW_RESULT": review},
+            prompt_values={**common, "IMPLEMENTATION_RESULT": current_impl, "REVIEW_RESULT": review},
             next_step="fix",
             dry_output=f"[dry-run: {implementation_agent} {task_type} fix output]",
             route=route,
             request=request,
             mutating=True,
         )
+        current_impl = fix
+
+    # 이후 최종리뷰/평가/보고는 최신 반영본 기준으로 진행한다.
+    implementation = current_impl
+    write_text(
+        run_dir / "review_loop_status.md",
+        f"resolved: {str(resolved).lower()}\n"
+        f"rounds_configured: {rounds}\n",
+    )
 
     final_review_prompt = render_template(
         "codex_final.md",
@@ -170,6 +194,7 @@ def run_role_step(
                 config,
                 agent,
                 model_for_agent(config, agent, route, request, mutating),
+                effort=effort_for_agent(config, agent, route, request, mutating),
                 mutating=mutating,
             ),
         )
@@ -183,6 +208,7 @@ def run_role_step(
             config,
             agent,
             model_for_agent(config, agent, route, request, mutating),
+            effort=effort_for_agent(config, agent, route, request, mutating),
             resolved_command=command_name,
             mutating=mutating,
         ),
@@ -199,12 +225,13 @@ def command_for_agent(
     config: Config,
     agent: str,
     model: str | None,
+    effort: str | None = None,
     resolved_command: str | None = None,
     mutating: bool = True,
 ) -> list[str]:
     if agent == "claude":
         permission_mode = None if mutating else "plan"
-        return claude_command(resolved_command or config.claude_command, model, permission_mode)
+        return claude_command(resolved_command or config.claude_command, model, permission_mode, effort)
     if agent == "codex":
         return codex_exec_command(config, resolved_command or config.codex_command, config.codex_sandbox, model)
     raise SystemExit(f"Unsupported agent: {agent}")
@@ -224,3 +251,18 @@ def model_for_agent(
     if agent == "claude":
         return config.claude_model
     return None
+
+
+def effort_for_agent(
+    config: Config,
+    agent: str,
+    route: dict[str, Any],
+    request: str,
+    mutating: bool,
+) -> str | None:
+    # high-risk backend를 opus로 구현/수정할 때는 최고 추론 강도(xhigh = ultracode 상당)로.
+    if agent != "claude":
+        return None
+    if mutating and route.get("task_type") == "backend" and is_high_risk(route, request):
+        return config.claude_high_risk_effort
+    return config.claude_effort

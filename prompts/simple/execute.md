@@ -1,22 +1,22 @@
-# Workspace
+# 작업공간
 
 {{WORKSPACE}}
 
-# Original User Request
+# 원본 사용자 요청
 
 {{REQUEST}}
 
-# Claude Planning Brief
+# Claude 기획 브리핑
 
 {{PLAN}}
 
-# Task For Codex
+# Codex를 위한 작업
 
-Execute the brief against the workspace.
+작업공간에 대해 브리핑을 실행하세요.
 
-Rules:
-- Keep changes scoped to the brief.
-- Preserve user changes.
-- Run reasonable validation commands.
-- Report changed files, tests run, failures, and remaining risks.
-- If blocked, explain the blocker and do not invent results.
+규칙:
+- 변경을 브리핑 범위로 한정하세요.
+- 사용자의 변경사항을 보존하세요.
+- 합리적인 검증 명령을 실행하세요.
+- 변경된 파일, 실행한 테스트, 실패, 남은 위험을 보고하세요.
+- 막히면 블로커를 설명하고 결과를 지어내지 마세요.
