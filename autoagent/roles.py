@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autoagent.config import Config
+from autoagent.safety import codex_sandbox_for
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,3 +42,68 @@ def load_roles(config_dir: Path) -> dict[str, dict[str, Any]]:
         for r in extra.get("roles", []):
             roles[r["id"]] = {**roles.get(r["id"], {}), **r}
     return roles
+
+
+def _is_high_risk(route: dict[str, Any], request: str) -> bool:
+    # routed_common.is_high_risk와 동일 판정(순환 import 방지 위해 지연 import).
+    from autoagent.workflows.routed_common import is_high_risk
+    return is_high_risk(route, request)
+
+
+def resolve_role(
+    entry: dict[str, Any],
+    *,
+    config: Config,
+    route: dict[str, Any],
+    request: str,
+    agent: str,
+    read_only: bool,
+) -> ResolvedRole:
+    """레지스트리 엔트리를 route/모델 정책에 따라 실행 속성으로 해석한다.
+
+    agent는 이미 결정된 구체 에이전트(claude/codex). entry["agent"]가 "route"면
+    호출부가 route에서 뽑아 넘긴다. 동작은 현행 리졸버들과 바이트 단위로 일치해야 한다.
+    """
+    mutating = bool(entry["mutating"])
+
+    # high-risk 조건 판정(역할별 비대칭 그대로).
+    cond = entry["high_risk_condition"]
+    if cond == "any_high_risk":
+        escalate = _is_high_risk(route, request)
+    elif cond == "backend_high_risk_mutating":
+        escalate = mutating and route.get("task_type") == "backend" and _is_high_risk(route, request)
+    else:
+        escalate = False
+
+    # 모델.
+    if agent == "codex":
+        model: str | None = config.codex_model
+    elif agent == "claude":
+        model = config.claude_high_risk_model if escalate else config.claude_model
+    else:
+        model = None
+
+    # effort.
+    effort_spec = entry["effort"]
+    if agent != "claude" or effort_spec == "none":
+        effort: str | None = None
+    else:  # "standard" | "tiered"
+        effort = config.claude_high_risk_effort if escalate else config.claude_effort
+
+    # 권한/샌드박스 — 병합된 command_for_agent(config-gated posture)와 동일하게 재현.
+    permission_mode = None
+    skip_permissions = False
+    sandbox = None
+    if agent == "claude":
+        if not mutating:
+            permission_mode = "plan"
+        elif config.claude_impl_permission == "bypassPermissions":
+            skip_permissions = True          # --dangerously-skip-permissions (무샌드박스 opt-in)
+        else:
+            permission_mode = "acceptEdits"  # 기본: 편집만 자동, bash/네트워크 차단
+    elif agent == "codex":
+        sb = entry.get("sandbox", "configured")
+        sandbox = codex_sandbox_for(read_only, config.codex_sandbox) if sb == "from_read_only" else config.codex_sandbox
+
+    return ResolvedRole(agent=agent, model=model, effort=effort, mutating=mutating,
+                        permission_mode=permission_mode, skip_permissions=skip_permissions, sandbox=sandbox)
