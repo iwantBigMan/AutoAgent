@@ -13,6 +13,7 @@
 - 테스트 스위트 없음(CLAUDE.md). 검증은 **`--dry-run`의 `*_command.json` / `*_prompt.md` 바이트 동일성**.
 - 이 계획은 **동작 보존 리팩터**: 모든 (task_type ∈ backend/frontend/docs) × (risk high/일반) × (read_only on/off) 조합에서 명령줄 결과가 변경 전과 **완전히 동일**해야 한다.
 - high-risk 비대칭을 그대로 재현: architect는 `is_high_risk`(any), implementer/fix는 `mutating & task_type=='backend' & is_high_risk`.
+- **보존 baseline은 권한 픽스(PR #5) 병합 후 상태**다: mutating Claude는 `config.claude_impl_permission` posture(기본 `acceptEdits`, opt-in `bypassPermissions`)를 따른다. resolve_role은 이 config-gating을 그대로 재현하고, command_for_agent의 내부 gating을 resolve_role로 이전한다.
 - final-review가 `codex_sandbox_for`를 우회해 `--read-only`에서도 쓰기 가능한 현재 동작은 **Plan A에서 그대로 보존**(버그 수정은 Plan B).
 - 캐노니컬 파일명(`01_`/`02_`/`03_`, `approval_required.md`, `checkpoint.json`) 보존.
 - 모든 신규 코드 주석·docstring은 **한국어**(프로젝트 관례 + 사용자 지시).
@@ -68,7 +69,8 @@ class ResolvedRole:
     model: str | None
     effort: str | None
     mutating: bool
-    permission_mode: str | None  # claude 전용(plan/None)
+    permission_mode: str | None  # claude 전용(plan/acceptEdits/None)
+    skip_permissions: bool       # claude 전용(--dangerously-skip-permissions; bypass posture)
     sandbox: str | None          # codex 전용
 
 
@@ -195,17 +197,23 @@ def resolve_role(
     else:  # "standard" | "tiered"
         effort = config.claude_high_risk_effort if escalate else config.claude_effort
 
-    # 권한/샌드박스.
+    # 권한/샌드박스 — 병합된 command_for_agent(config-gated posture)와 동일하게 재현.
     permission_mode = None
+    skip_permissions = False
     sandbox = None
     if agent == "claude":
-        permission_mode = None if mutating else "plan"
+        if not mutating:
+            permission_mode = "plan"
+        elif config.claude_impl_permission == "bypassPermissions":
+            skip_permissions = True          # --dangerously-skip-permissions (무샌드박스 opt-in)
+        else:
+            permission_mode = "acceptEdits"  # 기본: 편집만 자동, bash/네트워크 차단
     elif agent == "codex":
         sb = entry.get("sandbox", "configured")
         sandbox = codex_sandbox_for(read_only, config.codex_sandbox) if sb == "from_read_only" else config.codex_sandbox
 
     return ResolvedRole(agent=agent, model=model, effort=effort, mutating=mutating,
-                        permission_mode=permission_mode, sandbox=sandbox)
+                        permission_mode=permission_mode, skip_permissions=skip_permissions, sandbox=sandbox)
 ```
 
 - [ ] **Step 2: 대조 스크립트 작성 (`scripts/parity_check_roles.py`)**
@@ -315,12 +323,10 @@ roles = load_roles(DEFAULT_CONFIG.parent)  # 모듈 상단 or 함수 진입 시
 entry = roles[role_id]                      # role_id: "implementer"|"reviewer"|"fix"
 resolved = resolve_role(entry, config=config, route=route, request=request,
                         agent=agent, read_only=args.read_only)
-command = command_for_agent(config, resolved.agent, resolved.model,
-                            effort=resolved.effort, resolved_command=command_name,
-                            mutating=resolved.mutating)
+command = command_for_agent(config, resolved, resolved_command=command_name)
 ```
 
-`run_implementation_route`가 `run_role_step`을 부를 때 `role_id`를 넘기도록 시그니처에 `role_id` 추가(impl→"implementer", review→"reviewer", fix→"fix").
+`command_for_agent`는 **ResolvedRole 하나를 받는 얇은 빌더**로 리팩터한다(내부 config-gating 제거 — resolve_role로 이전). claude는 `claude_command(cmd, resolved.model, resolved.permission_mode, resolved.effort, skip_permissions=resolved.skip_permissions)`, codex는 `codex_exec_command(config, cmd, resolved.sandbox, resolved.model)`로 조립. `run_implementation_route`가 `run_role_step`을 부를 때 `role_id`를 넘기도록 시그니처에 `role_id` 추가(impl→"implementer", review→"reviewer", fix→"fix").
 
 - [ ] **Step 2: dry-run 바이트 동일성 (backend high-risk)**
 
