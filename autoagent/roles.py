@@ -44,6 +44,21 @@ def load_roles(config_dir: Path) -> dict[str, dict[str, Any]]:
     return roles
 
 
+def validate_roles(roles: dict[str, Any], config_dir: Path) -> None:
+    """시작 시 레지스트리 정합성 검사. 문제가 있으면 즉시 종료한다."""
+    required = {"context", "architect", "validation", "implementer", "reviewer",
+                "fix", "final-review", "evaluation", "report"}
+    missing = required - set(roles)
+    if missing:
+        raise SystemExit(f"roles.default.json에 필수 역할 누락: {sorted(missing)}")
+    valid_cond = {"none", "any_high_risk", "backend_high_risk_mutating"}
+    for rid, r in roles.items():
+        if r.get("high_risk_condition") not in valid_cond:
+            raise SystemExit(f"역할 {rid}: high_risk_condition 값 오류 {r.get('high_risk_condition')!r}")
+        if r.get("agent") not in {"claude", "codex", "route"}:
+            raise SystemExit(f"역할 {rid}: agent 값 오류 {r.get('agent')!r}")
+
+
 def _is_high_risk(route: dict[str, Any], request: str) -> bool:
     # routed_common.is_high_risk와 동일 판정(순환 import 방지 위해 지연 import).
     from autoagent.workflows.routed_common import is_high_risk
