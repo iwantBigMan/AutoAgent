@@ -123,6 +123,7 @@ def main() -> int:
             "claude_high_risk_model": config.claude_high_risk_model,
             "claude_effort": config.claude_effort,
             "claude_high_risk_effort": config.claude_high_risk_effort,
+            "claude_impl_permission": config.claude_impl_permission,
             "codex_model": config.codex_model,
             "codex_reasoning_effort": config.codex_reasoning_effort,
         },

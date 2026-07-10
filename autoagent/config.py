@@ -26,6 +26,7 @@ class Config:
     claude_high_risk_model: str
     claude_effort: str
     claude_high_risk_effort: str
+    claude_impl_permission: str
     codex_model: str
     codex_reasoning_effort: str
     default_max_agent_calls_review: int
@@ -60,6 +61,11 @@ def load_config(path: Path) -> Config:
         # 대화형 전용이라 무시됨). high-risk(opus)는 ultracode의 추론 강도에 해당하는 xhigh.
         claude_effort=raw.get("claude_effort") or "high",
         claude_high_risk_effort=raw.get("claude_high_risk_effort") or "xhigh",
+        # mutating(구현/수정) Claude 스텝의 권한 posture. 헤드리스에선 승인 TTY가 없어
+        # 편집이 차단되므로 최소 acceptEdits가 필요하다.
+        #   "acceptEdits"      = 파일 편집만 자동, bash/네트워크는 차단(안전 기본값).
+        #   "bypassPermissions"= --dangerously-skip-permissions, 명령·네트워크까지 자율(opt-in, 무샌드박스).
+        claude_impl_permission=raw.get("claude_impl_permission") or "acceptEdits",
         codex_model=raw.get("codex_model") or "gpt-5.5",
         codex_reasoning_effort=raw.get("codex_reasoning_effort") or "high",
         default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
