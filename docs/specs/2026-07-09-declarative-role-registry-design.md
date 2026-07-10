@@ -6,7 +6,7 @@
 
 ## 배경 / 문제
 
-지금 routed 워크플로우가 띄우는 9개 서브프로세스 역할(context, architect, validation, implementer, reviewer, fix, final-review, evaluation, report)은 **1급 객체가 아니다.** "역할"이란 (a) `{agent}_{task_type}_{step}.md` f-string 규칙으로 만든 프롬프트 이름, (b) `model_for_agent`/`architecture_model_for` 등이 고른 모델, (c) effort, (d) `command_for_agent`가 `mutating` 리터럴로 유도하는 권한/샌드박스, (e) Python 제어흐름상 하드코딩된 위치가 뭉쳐진 결과물이다. 모델 선택 로직이 5곳에 흩어져 있고(`routed_impl.py:224-268`, `routed_common.py:177-186`), high-risk 승격 규칙은 architect(any-high)와 impl(backend+high)에서 **중복·비대칭**이며, `config.codex_reasoning_effort`는 선언만 되고 `codex_exec_command`가 방출하지 않아 **죽은 knob**이다.
+지금 routed 워크플로우가 띄우는 9개 서브프로세스 역할(context, architect, validation, implementer, reviewer, fix, final-review, evaluation, report)은 **1급 객체가 아니다.** "역할"이란 (a) `{agent}_{task_type}_{step}.md` f-string 규칙으로 만든 프롬프트 이름, (b) `model_for_agent`/`architecture_model_for` 등이 고른 모델, (c) effort, (d) `command_for_agent`가 `mutating` 리터럴로 유도하는 권한/샌드박스, (e) Python 제어흐름상 하드코딩된 위치가 뭉쳐진 결과물이다. 모델 선택 로직이 5곳에 흩어져 있고(`routed_impl.py:224-268`, `routed_common.py:177-186`), high-risk 승격 규칙은 architect(any-high)와 impl(backend+high)에서 **중복·비대칭**이며, `config.codex_reasoning_effort`는 선언만 되고 `codex_exec_command`가 방출하지 않는다(README:206 결정에 따라 의도적으로 CLI 미주입 — 죽은 knob이 아니라 config 전용).
 
 사용자는 하네스를 "성숙"시키고자 한다: **서브에이전트 역할을 코드 수정 없이 정의**하고, **언제 나타날지(트리거)를 상황(route/risk/키워드)에 따라 자동 결정**하며, 새 역할(security-reviewer 등)을 손쉽게 추가하고 싶다.
 
@@ -17,7 +17,7 @@
 - 조건 기반(자동) 트리거로 신규 8개 역할을 파이프라인의 정해진 스테이지에서 발동.
 - review와 finish를 **선언된 역할 목록을 순회하는 확장 스테이지**로 일반화.
 - 교차검증 불변식(리뷰어=구현자 반대 모델)을 시작 시 검증으로 보장.
-- 죽은 `codex_reasoning_effort` 배선, high-risk 승격 중복을 부수적으로 해소.
+- high-risk 승격 중복을 부수적으로 해소. (`codex_reasoning_effort`는 README:206 결정대로 CLI 미주입 유지 — config 저장 전용, high는 `~/.codex/config.toml`.)
 
 비목표 (후속 단계)
 - **파이프라인 재배치/삽입/새 워크플로 저작(스펙 엔진)** = Phase 2. 이번엔 스테이지 순서를 코드에 유지한다.
@@ -117,7 +117,7 @@ research-explore?(preplan) → context → architect(설계문서) ⇄ validatio
 
 1. **config 포맷 = JSON.** `roles.default.json` 체크인 + `roles.json`(gitignore) override. 신규 의존성 없음.
 2. **final-review = Codex 고정 감사자(`fixed-codex`) 유지.** 교차검증 쌍과 별개의 독립 최종점검. 단 현재 `codex_sandbox_for`를 무시해 `--read-only`에서도 쓰기 가능하던 버그를 **수정**(read-only 존중).
-3. **codex_reasoning_effort 배선.** `codex_exec_command`가 역할이 opt-in한 경우에만 effort를 방출(미설정 역할은 command line 불변 → 기존 dry-run 동일).
+3. **codex_reasoning_effort는 CLI에 주입하지 않음(README:206 결정 존중).** config 저장 전용이며, Codex를 high로 돌리려면 `~/.codex/config.toml`의 `model_reasoning_effort`로 설정한다. `resolve_role`는 codex effort=None을 유지(동작 불변).
 4. **high-risk 승격 통일.** architect(any-high)와 impl(backend+high)의 비대칭을 tier 규칙 한 곳으로 정리하되 **각자의 기존 조건을 그대로 재현**(동작 불변).
 
 ## 검증 전략

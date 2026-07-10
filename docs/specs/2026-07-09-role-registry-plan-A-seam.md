@@ -382,52 +382,25 @@ git commit -m "preamble/common: context/architect/validation/final/eval/report�
 
 ---
 
-### Task 6: codex effort 배선 (opt-in) + 전체 parity 스윕
+### Task 6: 전체 parity 스윕 (최종 검증 — 코드 변경 없음)
 
-**Files:**
-- Modify: `autoagent/runner.py`
-- Modify: `autoagent/roles.py`
+**Files:** 없음. codex effort는 **README:206 결정대로 CLI에 주입하지 않는다**(config 저장만; high가 필요하면 `~/.codex/config.toml`의 `model_reasoning_effort`로 설정). 따라서 이전 계획의 `codex_exec_command` effort 배선은 **취소**한다. `resolve_role`는 codex effort=None을 유지(현행과 동일). 이 태스크는 리팩터 전체(Task 4–5)가 전 워크플로에서 동작 보존됐는지 확인하는 **검증 전용**이다.
 
-**Interfaces:**
-- Consumes: `resolve_role`가 codex 역할에 대해 `effort`를 낼 수 있게 확장.
+- [ ] **Step 1: 전체 dry-run parity 스윕**
 
-- [ ] **Step 1: `codex_exec_command`에 effort 인자 추가(opt-in)**
-
-`autoagent/runner.py`의 `codex_exec_command`에 `effort: str | None = None` 파라미터를 추가하고, 값이 있을 때만 `-c model_reasoning_effort=<effort>` 형태로 주입(정확한 플래그는 codex CLI 호환 확인). **기본 None이면 명령줄 불변.**
-
-```python
-def codex_exec_command(config, codex, sandbox, model=None, effort=None):
-    command = [codex, "--ask-for-approval", config.codex_approval, "exec"]
-    selected_model = model or config.codex_model
-    if selected_model:
-        command.extend(["-m", selected_model])
-    if effort:
-        command.extend(["-c", f"model_reasoning_effort={effort}"])
-    command.extend(["-C", str(config.workspace), "--sandbox", sandbox, "--skip-git-repo-check", "-"])
-    return command
+리팩터 전 커밋(Task 1 직전)과 현재 HEAD를 각각 `git worktree`로 체크아웃해 4개 워크플로 dry-run을 돌리고 모든 `*_command.json`을 바이트 비교:
 ```
-
-- [ ] **Step 2: resolve_role이 codex effort를 처리하도록 확장**
-
-`resolve_role`에서 `agent=="codex"`이고 엔트리 `effort`가 `"none"`이 아니면 `config.codex_reasoning_effort`를 반환(그 외 None). default 엔트리는 codex 역할 effort가 모두 `"none"`이라 **기본 동작 불변**.
-
-- [ ] **Step 3: 전체 dry-run parity 스윕**
-
-Run(각각 변경 전/후 산출물 비교):
-```
-python run.py --dry-run --workflow routed --task-type backend  --request "add auth token migration"
-python run.py --dry-run --workflow routed --task-type frontend --request "add settings toggle"
-python run.py --dry-run --workflow routed --task-type docs --read-only --request "review risks only"
+python run.py --dry-run --workflow routed --task-type backend  --implementer claude --max-review-rounds 1 --max-agent-calls 9 --workspace . --request "add a health check endpoint"
+python run.py --dry-run --workflow routed --task-type backend  --implementer claude --max-review-rounds 1 --max-agent-calls 9 --workspace . --request "add auth token migration"
+python run.py --dry-run --workflow routed --task-type frontend --max-review-rounds 1 --max-agent-calls 9 --workspace . --request "add settings toggle"
+python run.py --dry-run --workflow routed --task-type docs --read-only --max-review-rounds 0 --max-agent-calls 5 --workspace . --request "review risks only"
 python run.py --dry-run --workflow simple --request "review the project"
 ```
-Expected: 네 실행 모두 변경 전/후 run 폴더의 모든 `*_command.json`이 **바이트 동일**(역할 override 없음 상태). simple 워크플로우는 레지스트리를 안 쓰므로 당연히 동일.
+Expected: 다섯 실행 모두 리팩터 전/후 모든 `*_command.json` **바이트 동일**(backend high-risk는 게이트로 01/02/03만). simple은 레지스트리 미사용이라 당연 동일.
 
-- [ ] **Step 4: 커밋**
+- [ ] **Step 2: 결과 기록**
 
-```bash
-git add autoagent/runner.py autoagent/roles.py
-git commit -m "codex effort 배선(opt-in) + 전체 dry-run parity 확인"
-```
+코드 변경이 없으므로 별도 커밋 불필요. 스윕 결과(전 워크플로 바이트 동일)를 ledger에 기록한다.
 
 ---
 
