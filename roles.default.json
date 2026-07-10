@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "roles": [
+    { "id": "context",       "agent": "claude",  "model_tier": "standard", "high_risk_condition": "none",                       "effort": "none",     "mutating": false, "permission": "plan" },
+    { "id": "architect",     "agent": "claude",  "model_tier": "tiered",   "high_risk_condition": "any_high_risk",               "effort": "tiered",   "mutating": false, "permission": "plan" },
+    { "id": "validation",    "agent": "codex",   "model_tier": "standard", "high_risk_condition": "none",                       "effort": "none",     "mutating": false, "sandbox": "from_read_only" },
+    { "id": "implementer",   "agent": "route",   "model_tier": "tiered",   "high_risk_condition": "backend_high_risk_mutating", "effort": "tiered",   "mutating": true,  "permission": "write" },
+    { "id": "reviewer",      "agent": "route",   "model_tier": "standard", "high_risk_condition": "none",                       "effort": "standard", "mutating": false, "permission": "plan" },
+    { "id": "fix",           "agent": "route",   "model_tier": "tiered",   "high_risk_condition": "backend_high_risk_mutating", "effort": "tiered",   "mutating": true,  "permission": "write" },
+    { "id": "final-review",  "agent": "codex",   "model_tier": "standard", "high_risk_condition": "none",                       "effort": "none",     "mutating": false, "sandbox": "configured" },
+    { "id": "evaluation",    "agent": "codex",   "model_tier": "standard", "high_risk_condition": "none",                       "effort": "none",     "mutating": false, "sandbox": "from_read_only" },
+    { "id": "report",        "agent": "claude",  "model_tier": "standard", "high_risk_condition": "none",                       "effort": "none",     "mutating": false, "permission": "plan" }
+  ]
+}
