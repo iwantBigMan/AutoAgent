@@ -61,13 +61,23 @@ def claude_command(
     model: str | None = None,
     permission_mode: str | None = None,
     effort: str | None = None,
+    skip_permissions: bool = False,
 ) -> list[str]:
-    """headless `claude -p ...` 명령 리스트를 조립한다(model/permission-mode/effort 선택)."""
+    """headless `claude -p ...` 명령 리스트를 조립한다(model/permission-mode/effort 선택).
+
+    skip_permissions=True면 --dangerously-skip-permissions를 붙인다. 헤드리스 `claude -p`
+    기본 권한 모드는 파일 편집/명령 실행에 승인을 요구하는데, 서브프로세스엔 승인해줄 TTY가
+    없어 mutating 스텝의 Edit/Write가 전부 거부된다(구현이 디스크에 반영되지 않는 원인).
+    구현/수정 같은 mutating 스텝은 이 플래그로 자율 실행하게 하며, Codex의
+    `--ask-for-approval never`와 대칭이다. permission_mode와는 상호배타적으로 쓴다.
+    """
     command = [claude, "-p"]
     if model:
         command.extend(["--model", model])
     if permission_mode:
         command.extend(["--permission-mode", permission_mode])
+    if skip_permissions:
+        command.append("--dangerously-skip-permissions")
     if effort:
         # 유효값: low/medium/high/xhigh/max. 그 외는 claude가 경고 후 기본값으로 무시.
         command.extend(["--effort", effort])

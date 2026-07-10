@@ -230,8 +230,17 @@ def command_for_agent(
     mutating: bool = True,
 ) -> list[str]:
     if agent == "claude":
-        permission_mode = None if mutating else "plan"
-        return claude_command(resolved_command or config.claude_command, model, permission_mode, effort)
+        # 비mutating(리뷰 등)은 plan 모드로 읽기 전용. mutating(구현/수정)은 config의
+        # claude_impl_permission posture를 따른다. 헤드리스엔 승인 TTY가 없어 최소한
+        # acceptEdits라야 파일 편집이 실제로 적용된다(그렇지 않으면 전부 거부됨).
+        if not mutating:
+            return claude_command(resolved_command or config.claude_command, model, "plan", effort)
+        if config.claude_impl_permission == "bypassPermissions":
+            # 편집+명령+네트워크까지 자율(무샌드박스). Codex의 --ask-for-approval never에 대응하나
+            # OS 샌드박스는 없으므로 명시 opt-in일 때만.
+            return claude_command(resolved_command or config.claude_command, model, None, effort, skip_permissions=True)
+        # 기본: acceptEdits — 파일 편집만 자동, bash/네트워크는 헤드리스에서 차단.
+        return claude_command(resolved_command or config.claude_command, model, "acceptEdits", effort)
     if agent == "codex":
         return codex_exec_command(config, resolved_command or config.codex_command, config.codex_sandbox, model)
     raise SystemExit(f"Unsupported agent: {agent}")
