@@ -10,11 +10,12 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
-from autoagent.artifacts import render_template, write_text
+from autoagent.artifacts import DEFAULT_CONFIG, render_template, write_text
 from autoagent.config import Config
-from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
-from autoagent.safety import codex_sandbox_for, review_needs_changes
-from autoagent.workflows.routed_common import architecture_effort_for, architecture_model_for, stop_after
+from autoagent.roles import load_roles, resolve_role
+from autoagent.runner import AgentCallBudget, require_command, run_process, write_command_artifact
+from autoagent.safety import review_needs_changes
+from autoagent.workflows.routed_common import stop_after
 
 
 def run_preamble(
@@ -26,21 +27,26 @@ def run_preamble(
     run_dir: Path,
 ) -> tuple[str, str, str, bool]:
     """(context, architecture, validation, stopped)를 반환. stopped면 상위에서 조기 종료."""
+    # 지연 import: routed_impl.command_for_agent와의 순환 import 방지(roles.py의 관례와 동일).
+    from autoagent.workflows.routed_impl import command_for_agent
+
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    request = base_values["REQUEST"]
+
+    context_role = resolve_role(
+        roles["context"], config=config, route=route, request=request, agent="claude", read_only=args.read_only
+    )
     context_prompt = render_template("claude_context.md", base_values)
     if args.dry_run:
         write_text(run_dir / "01_claude_context_prompt.md", context_prompt)
-        write_command_artifact(
-            run_dir,
-            "01_claude_context",
-            claude_command(config.claude_command, config.claude_model, "plan"),
-        )
+        write_command_artifact(run_dir, "01_claude_context", command_for_agent(config, context_role))
         context = "[dry-run: Claude context output]"
     else:
         claude = require_command(config.claude_command)
         budget.before_call(next_step="context", out_dir=run_dir, dry_run=args.dry_run)
         context = run_process(
             name="01_claude_context",
-            command=claude_command(claude, config.claude_model, "plan"),
+            command=command_for_agent(config, context_role, resolved_command=claude),
             prompt=context_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -50,9 +56,12 @@ def run_preamble(
     if stop_after(args, run_dir, "context"):
         return context, "", "", True
 
-    architecture_model = architecture_model_for(config, route, base_values["REQUEST"])
-    architecture_effort = architecture_effort_for(config, route, base_values["REQUEST"])
-    sandbox = codex_sandbox_for(args.read_only, config.codex_sandbox)
+    architect_role = resolve_role(
+        roles["architect"], config=config, route=route, request=request, agent="claude", read_only=args.read_only
+    )
+    validation_role = resolve_role(
+        roles["validation"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+    )
 
     def run_architecture(name: str, prior_validation: str) -> str:
         prompt = render_template(
@@ -65,17 +74,13 @@ def run_preamble(
         )
         if args.dry_run:
             write_text(run_dir / f"{name}_prompt.md", prompt)
-            write_command_artifact(
-                run_dir,
-                name,
-                claude_command(config.claude_command, architecture_model, "plan", architecture_effort),
-            )
+            write_command_artifact(run_dir, name, command_for_agent(config, architect_role))
             return "[dry-run: Claude architecture output]"
         claude = require_command(config.claude_command)
         budget.before_call(next_step="architecture", out_dir=run_dir, dry_run=args.dry_run)
         result = run_process(
             name=name,
-            command=claude_command(claude, architecture_model, "plan", architecture_effort),
+            command=command_for_agent(config, architect_role, resolved_command=claude),
             prompt=prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -95,15 +100,13 @@ def run_preamble(
         )
         if args.dry_run:
             write_text(run_dir / f"{name}_prompt.md", prompt)
-            write_command_artifact(
-                run_dir, name, codex_exec_command(config, config.codex_command, sandbox)
-            )
+            write_command_artifact(run_dir, name, command_for_agent(config, validation_role))
             return "[dry-run: Codex validation output]"
         codex = require_command(config.codex_command)
         budget.before_call(next_step="validation", out_dir=run_dir, dry_run=args.dry_run)
         result = run_process(
             name=name,
-            command=codex_exec_command(config, codex, sandbox),
+            command=command_for_agent(config, validation_role, resolved_command=codex),
             prompt=prompt,
             cwd=config.workspace,
             out_dir=run_dir,

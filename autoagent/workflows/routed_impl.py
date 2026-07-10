@@ -106,6 +106,12 @@ def run_implementation_route(
         f"rounds_configured: {rounds}\n",
     )
 
+    # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
+    # 그대로 쓴다(현행 버그를 의도적으로 보존 — 수정은 별도 계획에서 다룬다).
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    final_review_role = resolve_role(
+        roles["final-review"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+    )
     final_review_prompt = render_template(
         "codex_final.md",
         {
@@ -117,18 +123,14 @@ def run_implementation_route(
     )
     if args.dry_run:
         write_text(run_dir / "07_codex_final_review_prompt.md", final_review_prompt)
-        write_command_artifact(
-            run_dir,
-            "07_codex_final_review",
-            codex_exec_command(config, config.codex_command, config.codex_sandbox),
-        )
+        write_command_artifact(run_dir, "07_codex_final_review", command_for_agent(config, final_review_role))
         final_review = "[dry-run: Codex final review output]"
     else:
         codex = require_command(config.codex_command)
         budget.before_call(next_step="final-review", out_dir=run_dir, dry_run=args.dry_run)
         final_review = run_process(
             name="07_codex_final_review",
-            command=codex_exec_command(config, codex, config.codex_sandbox),
+            command=command_for_agent(config, final_review_role, resolved_command=codex),
             prompt=final_review_prompt,
             cwd=config.workspace,
             out_dir=run_dir,

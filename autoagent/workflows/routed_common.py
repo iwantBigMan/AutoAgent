@@ -2,8 +2,8 @@
 
 - 승인 게이트: approval_required(판정) / block_for_human_approval / write_checkpoint.
 - 재개용 상태 저장(checkpoint.json), 구현 차단(block_implementation).
-- 모델·effort 선택: architecture_model_for / architecture_effort_for.
-- 종료 제어: stop_after. 평가·보고: run_evaluation / run_final_report.
+- 종료 제어: stop_after. 평가·보고: run_evaluation / run_final_report
+  (각각 evaluation/report 역할을 resolve_role로 해석해 조립한다).
 """
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
-from autoagent.artifacts import render_template, write_json, write_text
+from autoagent.artifacts import DEFAULT_CONFIG, render_template, write_json, write_text
 from autoagent.config import Config
-from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
-from autoagent.safety import codex_sandbox_for
+from autoagent.roles import load_roles, resolve_role
+from autoagent.runner import AgentCallBudget, require_command, run_process, write_command_artifact
 
 
 HIGH_RISK_REQUEST_TERMS = ["migration", "auth", "payment", "production", "backfill", "rollback"]
@@ -88,6 +88,17 @@ def block_for_human_approval(run_dir: Path, route: dict[str, Any]) -> int:
     return 0
 
 
+def _route_request_from_common(common: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """common에 담긴 ROUTE_JSON/REQUEST에서 route/request를 복원한다.
+
+    evaluation/report 역할은 high_risk_condition="none"이라 route/request 값 자체는
+    판정에 영향을 주지 않지만, resolve_role 시그니처를 맞추기 위해 필요하다.
+    """
+    route = json.loads(common["ROUTE_JSON"])
+    request = common["REQUEST"]
+    return route, request
+
+
 def run_evaluation(
     args: Namespace,
     config: Config,
@@ -101,6 +112,9 @@ def run_evaluation(
     fix: str,
     final_review: str,
 ) -> str:
+    # 지연 import: routed_impl.command_for_agent와의 순환 import 방지(roles.py의 관례와 동일).
+    from autoagent.workflows.routed_impl import command_for_agent
+
     evaluation_prompt = render_template(
         "codex_evaluator.md",
         {
@@ -111,17 +125,21 @@ def run_evaluation(
             "FINAL_REVIEW_RESULT": final_review,
         },
     )
-    sandbox = codex_sandbox_for(args.read_only, config.codex_sandbox)
+    route, request = _route_request_from_common(common)
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    resolved = resolve_role(
+        roles["evaluation"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+    )
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", evaluation_prompt)
-        write_command_artifact(run_dir, name, codex_exec_command(config, config.codex_command, sandbox))
+        write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         evaluation = "[dry-run: Codex evaluation output]"
     else:
         codex = require_command(config.codex_command)
         budget.before_call(next_step="evaluation", out_dir=run_dir, dry_run=args.dry_run)
         evaluation = run_process(
             name=name,
-            command=codex_exec_command(config, codex, sandbox),
+            command=command_for_agent(config, resolved, resolved_command=codex),
             prompt=evaluation_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -146,6 +164,9 @@ def run_final_report(
     final_review: str,
     evaluation: str,
 ) -> str:
+    # 지연 import: routed_impl.command_for_agent와의 순환 import 방지(roles.py의 관례와 동일).
+    from autoagent.workflows.routed_impl import command_for_agent
+
     final_prompt = render_template(
         "claude_final.md",
         {
@@ -157,33 +178,26 @@ def run_final_report(
             "FINAL_EVALUATION": evaluation,
         },
     )
+    route, request = _route_request_from_common(common)
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    resolved = resolve_role(
+        roles["report"], config=config, route=route, request=request, agent="claude", read_only=args.read_only
+    )
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", final_prompt)
-        write_command_artifact(run_dir, name, claude_command(config.claude_command, config.claude_model, "plan"))
+        write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         return "[dry-run: final report output]"
 
     claude = require_command(config.claude_command)
     budget.before_call(next_step="report", out_dir=run_dir, dry_run=args.dry_run)
     return run_process(
         name=name,
-        command=claude_command(claude, config.claude_model, "plan"),
+        command=command_for_agent(config, resolved, resolved_command=claude),
         prompt=final_prompt,
         cwd=config.workspace,
         out_dir=run_dir,
         timeout_seconds=config.timeout_seconds,
     )
-
-
-def architecture_model_for(config: Config, route: dict[str, Any], request: str) -> str:
-    if is_high_risk(route, request):
-        return config.claude_high_risk_model
-    return config.claude_model
-
-
-def architecture_effort_for(config: Config, route: dict[str, Any], request: str) -> str:
-    if is_high_risk(route, request):
-        return config.claude_high_risk_effort
-    return config.claude_effort
 
 
 def write_checkpoint(run_dir, *, request, config, route, args) -> None:
