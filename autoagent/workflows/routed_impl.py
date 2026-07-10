@@ -10,11 +10,12 @@ from argparse import Namespace
 from pathlib import Path
 from typing import Any
 
-from autoagent.artifacts import render_template, write_text
+from autoagent.artifacts import DEFAULT_CONFIG, render_template, write_text
 from autoagent.config import Config
+from autoagent.roles import ResolvedRole, load_roles, resolve_role
 from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
 from autoagent.safety import review_needs_changes
-from autoagent.workflows.routed_common import is_high_risk, run_evaluation, run_final_report, stop_after
+from autoagent.workflows.routed_common import run_evaluation, run_final_report, stop_after
 
 
 def run_implementation_route(
@@ -37,6 +38,7 @@ def run_implementation_route(
         run_dir=run_dir,
         budget=budget,
         agent=implementation_agent,
+        role_id="implementer",
         name=f"04_{implementation_agent}_{task_type}_impl",
         prompt_name=f"{implementation_agent}_{task_type}_impl.md",
         prompt_values=common,
@@ -63,6 +65,7 @@ def run_implementation_route(
             run_dir=run_dir,
             budget=budget,
             agent=review_agent,
+            role_id="reviewer",
             name=f"05_{review_agent}_{task_type}_review_r{r}",
             prompt_name=f"{review_agent}_{task_type}_review.md",
             prompt_values={**common, "IMPLEMENTATION_RESULT": current_impl},
@@ -83,6 +86,7 @@ def run_implementation_route(
             run_dir=run_dir,
             budget=budget,
             agent=implementation_agent,
+            role_id="fix",
             name=f"06_{implementation_agent}_{task_type}_fix_r{r}",
             prompt_name=f"{implementation_agent}_{task_type}_fix.md",
             prompt_values={**common, "IMPLEMENTATION_RESULT": current_impl, "REVIEW_RESULT": review},
@@ -175,6 +179,7 @@ def run_role_step(
     run_dir: Path,
     budget: AgentCallBudget,
     agent: str,
+    role_id: str,
     name: str,
     prompt_name: str,
     prompt_values: dict[str, Any],
@@ -184,34 +189,29 @@ def run_role_step(
     request: str,
     mutating: bool,
 ) -> str:
+    # 역할 레지스트리에서 role_id 엔트리를 읽어 route/모델 정책에 따라 실행 속성으로 해석한다.
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    entry = roles[role_id]
+    resolved = resolve_role(
+        entry,
+        config=config,
+        route=route,
+        request=request,
+        agent=agent,
+        read_only=args.read_only,
+    )
+
     prompt = render_template(prompt_name, prompt_values)
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", prompt)
-        write_command_artifact(
-            run_dir,
-            name,
-            command_for_agent(
-                config,
-                agent,
-                model_for_agent(config, agent, route, request, mutating),
-                effort=effort_for_agent(config, agent, route, request, mutating),
-                mutating=mutating,
-            ),
-        )
+        write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         return dry_output
 
     command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
     budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
-        command=command_for_agent(
-            config,
-            agent,
-            model_for_agent(config, agent, route, request, mutating),
-            effort=effort_for_agent(config, agent, route, request, mutating),
-            resolved_command=command_name,
-            mutating=mutating,
-        ),
+        command=command_for_agent(config, resolved, resolved_command=command_name),
         prompt=prompt,
         cwd=config.workspace,
         out_dir=run_dir,
@@ -223,55 +223,18 @@ def run_role_step(
 
 def command_for_agent(
     config: Config,
-    agent: str,
-    model: str | None,
-    effort: str | None = None,
+    resolved: ResolvedRole,
     resolved_command: str | None = None,
-    mutating: bool = True,
 ) -> list[str]:
-    if agent == "claude":
-        # 비mutating(리뷰 등)은 plan 모드로 읽기 전용. mutating(구현/수정)은 config의
-        # claude_impl_permission posture를 따른다. 헤드리스엔 승인 TTY가 없어 최소한
-        # acceptEdits라야 파일 편집이 실제로 적용된다(그렇지 않으면 전부 거부됨).
-        if not mutating:
-            return claude_command(resolved_command or config.claude_command, model, "plan", effort)
-        if config.claude_impl_permission == "bypassPermissions":
-            # 편집+명령+네트워크까지 자율(무샌드박스). Codex의 --ask-for-approval never에 대응하나
-            # OS 샌드박스는 없으므로 명시 opt-in일 때만.
-            return claude_command(resolved_command or config.claude_command, model, None, effort, skip_permissions=True)
-        # 기본: acceptEdits — 파일 편집만 자동, bash/네트워크는 헤드리스에서 차단.
-        return claude_command(resolved_command or config.claude_command, model, "acceptEdits", effort)
-    if agent == "codex":
-        return codex_exec_command(config, resolved_command or config.codex_command, config.codex_sandbox, model)
-    raise SystemExit(f"Unsupported agent: {agent}")
-
-
-def model_for_agent(
-    config: Config,
-    agent: str,
-    route: dict[str, Any],
-    request: str,
-    mutating: bool,
-) -> str | None:
-    if agent == "codex":
-        return config.codex_model
-    if agent == "claude" and mutating and route.get("task_type") == "backend" and is_high_risk(route, request):
-        return config.claude_high_risk_model
-    if agent == "claude":
-        return config.claude_model
-    return None
-
-
-def effort_for_agent(
-    config: Config,
-    agent: str,
-    route: dict[str, Any],
-    request: str,
-    mutating: bool,
-) -> str | None:
-    # high-risk backend를 opus로 구현/수정할 때는 최고 추론 강도(xhigh = ultracode 상당)로.
-    if agent != "claude":
-        return None
-    if mutating and route.get("task_type") == "backend" and is_high_risk(route, request):
-        return config.claude_high_risk_effort
-    return config.claude_effort
+    """ResolvedRole 하나로 실행 커맨드를 조립하는 얇은 빌더(권한/샌드박스 계산은 resolve_role이 담당)."""
+    if resolved.agent == "claude":
+        return claude_command(
+            resolved_command or config.claude_command,
+            resolved.model,
+            resolved.permission_mode,
+            resolved.effort,
+            skip_permissions=resolved.skip_permissions,
+        )
+    if resolved.agent == "codex":
+        return codex_exec_command(config, resolved_command or config.codex_command, resolved.sandbox, resolved.model)
+    raise SystemExit(f"Unsupported agent: {resolved.agent}")
