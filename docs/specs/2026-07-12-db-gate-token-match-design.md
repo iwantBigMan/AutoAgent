@@ -1,12 +1,13 @@
-# DB 게이트 토큰 매칭 설계
+# DB 게이트 매칭 정밀화 설계
 
 > 작성일: 2026-07-12 · 상태: 설계(승인 대기)
+> (초기 "토큰 매칭" 안은 하네스 리뷰에서 안전 회귀가 드러나 substring-except-db로 교체됨)
 
 ## 목표
 
 DB 승인 게이트가 **substring 오발**로 뜨는 문제를 없앤다. `db_score` 같은 코드
-심볼이 `"db"`에 걸려 subtype=db·risk=high로 불필요한 승인 게이트를 띄우던 것을
-토큰 매칭으로 교정한다.
+심볼이 `"db"`에 걸려 subtype=db·risk=high로 불필요한 승인 게이트를 띄우던 것을,
+**실제 DB 용어는 하나도 놓치지 않으면서** 좁게 교정한다.
 
 ## 배경 — 현재 오발
 
@@ -16,42 +17,48 @@ DB 승인 게이트가 **substring 오발**로 뜨는 문제를 없앤다. `db_s
 db_score = sum(1 for term in DB_TERMS if term in lowered)   # substring
 ```
 
-- `"db"`(2글자) → `db_score`·`mongodb`·`adblock` 등에 걸림 ← **관측된 오발**
+- `"db"`(2글자) → `db_score`·`score_db_cache` 등 snake_case 식별자에 걸림 ← **관측된 오발**
   (라우팅 의도 가드 구현 요청에서 요청문의 `db_score` 언급이 게이트를 띄움)
-- `"table"` → `comfortable`·`portable`, `"index"` → `index.html` 에도 걸림
 
 `db_score > 0`이면 `subtype=db`·`risk_level=high` → `is_high_risk` → 승인 게이트.
-즉 요청에 코드 심볼/일반 단어만 있어도 게이트가 뜬다.
 
 ## 안전 비대칭 (이 fix의 핵심 제약)
 
-라우팅 오분류와 **정반대 방향**이다.
+이건 **안전 게이트**의 입력이라 라우팅 오분류와 방향이 반대다.
 
-- **DB 게이트 과다발동**(불필요한 게이트) = 안전하지만 귀찮음.
-- **DB 게이트 누락**(실제 DB 변경인데 게이트 없이 자동 실행) = **위험**.
+- **과다발동**(불필요한 게이트) = 안전하지만 귀찮음.
+- **누락**(실제 DB 변경인데 게이트 없이 자동 실행) = **위험**.
 
-→ 따라서 **명백히 가짜인 매치만 제거**하고, 실제 DB 요청(standalone·복수형)은
-절대 놓치지 않게 보수적으로 간다. `HIGH_RISK_TERMS`는 손대지 않는다(과다발동이
-안전 방향).
+→ 따라서 매칭을 **전역적으로 조이면 안 된다**(조일수록 누락↑=위험). 느슨한
+substring을 유지하되, **관측된 유일한 오발원 `"db"`만 좁게** 배제한다.
 
-## 설계 — 식별자 토큰 매칭
+### 왜 "토큰 완전일치"가 아닌가 (기각된 초기 안)
 
-`db_score` 계산만 substring → **토큰 매칭**으로 교체. `import re`는 라우팅 의도
-가드(선행 PR)에서 이미 추가됨.
+처음엔 모든 DB 용어를 식별자 토큰 완전일치(+복수형)로 바꾸려 했으나, 하네스
+리뷰가 **안전 회귀**를 잡았다: `postgresql`≠`postgres`, `mysql`≠`sql`,
+`mongodb`≠`db` 가 되어 **실제 DB 요청이 게이트를 우회**한다. 게이트를 더
+타이트하게 만드는 방향이라 안전 비대칭에 정면으로 반한다 → 기각.
+
+## 설계 — substring 유지 + `db`만 언더스코어 배제
 
 ```python
-def db_term_count(lowered: str) -> int:
-    """DB_TERMS 중 요청에 실제 등장한 개수. 식별자 토큰 매칭으로 substring 오발 방지.
+def db_term_count(text: str) -> int:
+    """DB_TERMS 중 등장 개수. 'db' 코드 심볼(db_score) 오발만 좁게 배제.
 
-    'db'가 'db_score' 코드 심볼에, 'table'이 'comfortable'에 걸리던 것을 막는다.
-    단어 용어는 토큰 완전일치(복수형 -s/-es 허용), 다단어 용어('foreign key')는 부분일치.
+    안전 게이트 입력이라 실제 DB 용어 누락이 최우선 위험이다. 대부분 용어는 느슨한
+    부분일치를 그대로 써서 postgres→postgresql, sql→mysql, db→mongodb 결합어까지
+    계속 잡는다(과다발동은 안전 방향). 유일한 짧은 오발원 'db'만 snake_case
+    식별자(언더스코어 인접)일 때 제외한다. 입력은 어떤 대소문자든 내부에서 소문자화.
     """
-    tokens = set(re.findall(r"[a-z0-9_]+", lowered))
-    def hit(term: str) -> bool:
-        if " " in term:            # 다단어 용어는 부분일치 유지
-            return term in lowered
-        return any(t == term or t == term + "s" or t == term + "es" for t in tokens)
-    return sum(1 for term in DB_TERMS if hit(term))
+    lowered = text.lower()
+    count = 0
+    for term in DB_TERMS:
+        if term == "db":
+            if re.search(r"(?<!_)db(?!_)", lowered):   # 언더스코어 비인접 'db'만
+                count += 1
+        elif term in lowered:                          # 나머지는 느슨한 substring
+            count += 1
+    return count
 ```
 
 호출부:
@@ -59,55 +66,54 @@ def db_term_count(lowered: str) -> int:
 db_score = db_term_count(lowered)   # 기존 sum(... in lowered) 대체
 ```
 
-- `db_score` → 토큰 `db_score`는 통째로 한 토큰이라 `db`와 불일치 → **0** (오발 해소)
-- `comfortable`/`portable` → `table` 불일치 (덤으로 교정)
-- `users table`·`columns`·`schemas`·`indexes` → standalone·복수형 **정상 매치**(누락 없음)
-- `DB를 수정` → `를`가 토큰 경계를 끊어 `db` 토큰 **유지** → 매치됨
-
-`[a-z0-9_]+`가 언더스코어를 토큰에 포함하므로 `db_score`가 쪼개지지 않는 것이 핵심.
-한국어 조사/문자는 `[a-z0-9_]`가 아니라 토큰을 끊어 standalone 영어 DB 용어를 살린다.
+- `db_score`·`score_db_cache` → `db`가 언더스코어 인접 → **미포함** (오발 해소)
+- `mongodb`·`the db` → `db`가 언더스코어 비인접 → **포함** (누락 없음)
+- `postgresql`(postgres+sql)·`mysql`(sql)·`columns`·`schemas`·`indexes`·`DB를` →
+  substring/내부 lower로 **전부 포함** (안전 회귀 없음)
+- `import re`는 라우팅 의도 가드(선행 PR)에서 이미 추가됨.
 
 ## 스코프
 
-- **`DB_TERMS` 매칭만** 교체. `high_risk_score`(substring)는 **불변** — 여기선
-  과다발동이 안전 방향이고, 토큰화하면 `authentication`·`migrations` 같은 진짜
-  위험어를 놓칠 수 있어 오히려 위험.
-- `db_score`가 쓰이는 하류 로직(subtype/risk/gate)은 **불변** — 입력 계산만 정밀화.
+- `db_score` 계산(=`db_term_count`)만 교체. **`DB_TERMS` 내용·`HIGH_RISK_TERMS`
+  (substring)·하류 subtype/risk/게이트·반환 dict·`route_task` 시그니처·명시
+  `--task-type` 경로·라우팅 의도 가드 전부 불변.**
 
 ## 하위호환 / 회귀
 
-- 실제 DB 요청(standalone·복수형 DB 용어) → `db_score>0` 유지 → subtype=db·risk=high·게이트 **유지**.
-- 반환 dict 11키·순서·`route_task` 시그니처 불변.
-- 명시 `--task-type` 경로·`high_risk_score`·`is_high_risk`·`approval_required` 로직 불변.
-- 라우팅 의도 가드(선행 PR)와 무간섭(별개 변수).
+- `db` 외 모든 DB 용어는 substring 그대로 → 실제 DB 요청 매칭 **동일**(누락 신규 없음).
+- `db`는 언더스코어 비인접일 때만 → standalone·결합어(mongodb)는 유지, 코드 식별자만 제외.
+- 반환 dict 11키·순서 불변.
 
 ## 엣지 (잔여, 수용)
 
-- `index.html`의 `index`, 배열 `index` → DB `index`와 구분 불가(토큰 `index` 일치).
-  현행 substring도 동일하게 매치하므로 **회귀 아님**. `index` 의미 중의성은 스코프 밖.
-- `indices`(라틴 복수)·`mongodb`(식별자 결합) → 미매치. 드묾, 안전 비대칭상 게이트
-  누락이지만 실사용 빈도 낮음. 필요 시 별도 보강.
+- **`comfortable`→`table`** 등 짧은 일반단어 substring 과다발동은 **원 동작 그대로 유지**
+  (이번 스코프 밖, 안전 방향이라 무해). 이번 fix는 `db`만 다룬다.
+- **`migrate my_db`** 처럼 snake_case DB 이름의 `db`는 배제됨(부수효과). 저빈도이고,
+  같은 요청에 다른 DB 용어(table/column 등)가 있으면 여전히 게이트됨.
 
 ## 검증 (테스트 스위트 없음 → 순수함수 표 체크)
 
-`db_term_count`와 `route_task`를 직접 호출해 확인한다.
+`db_term_count`·`route_task`를 직접 호출해 확인한다(정상 python).
 
 ```python
 from autoagent.routing import db_term_count, route_task
 
-# 1) db_term_count 단위
-assert db_term_count("routing.py의 db_score 오버라이드 앞에 둔다") == 0   # 오발 해소
-assert db_term_count("make the button comfortable") == 0                  # table 오발 해소
-assert db_term_count("add a column to the users table") >= 2              # column+table
-assert db_term_count("create schemas and indexes") >= 2                   # 복수형 -s/-es
-assert db_term_count("DB를 마이그레이션") >= 1                            # 조사 경계로 db 유지
-
-# 2) 게이트 레벨 회귀 (route_task subtype/risk)
+# 오발 제거
+assert db_term_count("routing.py의 db_score 오버라이드 앞에 둔다") == 0
+assert db_term_count("save it to score_db_cache") == 0
+# 안전 회귀 방지 (실제 DB는 반드시 매치)
+assert db_term_count("use postgresql for storage") >= 1     # postgres/sql substring
+assert db_term_count("switch to mysql") >= 1                # sql substring
+assert db_term_count("use mongodb") >= 1                    # db 결합어(언더스코어 비인접)
+assert db_term_count("add a column to the users table") >= 2
+assert db_term_count("create schemas and indexes") >= 2
+assert db_term_count("DB를 마이그레이션") >= 1              # 대문자→내부 lower
+# 게이트 레벨
 r_false = route_task("backend", "routing.py의 db_score 오버라이드 수정")
-assert r_false["subtype"] != "db" and r_false["risk_level"] != "high"     # 오발 게이트 없음
-
-r_real = route_task("backend", "add a column to the users table")
-assert r_real["subtype"] == "db" and r_real["risk_level"] == "high"       # 실제 DB 게이트 유지
+assert r_false["subtype"] != "db" and r_false["risk_level"] != "high"
+for req in ["use postgresql for storage", "switch to mysql", "DB를 마이그레이션"]:
+    r = route_task("backend", req)
+    assert r["subtype"] == "db" and r["risk_level"] == "high"
 ```
 
-전 케이스 통과 + 반환 dict 계약 불변을 확인한다.
+전 케이스 통과 + 반환 dict 계약·라우팅 의도 가드 회귀 없음을 확인한다.
