@@ -74,11 +74,26 @@ def prompt_path(name: str) -> Path:
     return ROOT / "prompts" / relative
 
 
-def make_run_dir() -> Path:
+def validate_project_name(project: str) -> None:
+    """project 이름이 단일 path segment인지 검증한다.
+
+    '..', '/', '\\'가 섞이면 projects/<name> 경계를 벗어나 다른 위치의 config를
+    읽거나 runs 디렉터리를 만들 수 있어(경로 이탈) 여기서 명확히 막는다.
+    """
+    if not project or project in {".", ".."} or "/" in project or "\\" in project:
+        raise SystemExit(f"Invalid project name: {project!r}")
+
+
+def make_run_dir(project: str | None = None) -> Path:
+    """runs 폴더를 만든다. project가 있으면 projects/<name>/runs 아래, 없으면 기존 ROOT/runs 아래."""
+    if project is not None:
+        # 빈 문자열('')도 명시 지정이면 거부한다. if project:면 falsy라 조용히 ROOT/runs로 폴백됨.
+        validate_project_name(project)
+    base = ROOT / "projects" / project / "runs" if project else ROOT / "runs"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     for attempt in range(100):
         suffix = "" if attempt == 0 else f"_{attempt:02d}"
-        path = ROOT / "runs" / f"{stamp}{suffix}"
+        path = base / f"{stamp}{suffix}"
         try:
             path.mkdir(parents=True, exist_ok=False)
             return path

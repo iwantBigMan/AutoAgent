@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from autoagent.artifacts import validate_project_name
+
 
 @dataclass
 class Config:
@@ -33,14 +35,27 @@ class Config:
     default_max_agent_calls_implementation: int
 
 
-def load_config(path: Path) -> Config:
+def load_config(path: Path, project: str | None = None) -> Config:
     """config JSON을 읽어 Config를 만든다. 파일/키가 없으면 각 항목 기본값을 쓴다.
 
-    workspace는 config > AUTOAGENT_WORKSPACE env > 하드코딩 기본값 순으로 결정.
+    workspace는 (프로젝트 config) > 전역 config > AUTOAGENT_WORKSPACE env >
+    하드코딩 기본값 순으로 결정. project가 없으면 전역 config만 읽어 기존과 동일하게 동작한다.
     """
     raw: dict[str, Any] = {}
     if path.exists():
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
+
+    if project is not None:
+        # 경로 이탈(path traversal) 방지: project는 반드시 단일 path segment여야 한다.
+        # 빈 문자열도 여기서 validate_project_name이 거부한다(if project:면 falsy라 조용히 폴백).
+        validate_project_name(project)
+        # path 기본값이 ROOT/autoagent.config.json이라 path.parent가 곧 ROOT.
+        # cli.py의 roles 로딩(DEFAULT_CONFIG.parent)과 같은 결합을 이미 저장소가 쓰고 있다.
+        project_config_path = path.parent / "projects" / project / "config.json"
+        if not project_config_path.exists():
+            raise SystemExit(f"Project config not found: {project_config_path}")
+        project_raw = json.loads(project_config_path.read_text(encoding="utf-8-sig"))
+        raw = {**raw, **project_raw}  # 얕은 병합: 프로젝트 config가 전역을 키 단위로 덮는다.
 
     workspace = Path(
         raw.get("workspace")
