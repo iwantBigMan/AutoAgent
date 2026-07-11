@@ -60,7 +60,12 @@ if scores[chosen] == 0:
 ```python
 if chosen == "docs" and impl_intent:
     # 명사가 docs를 가리켜도 구현 의도가 있으면 구현 라우트로 되돌린다.
-    chosen = "frontend" if scores["frontend"] > scores["backend"] else "backend"
+    # 파일명 속 'design'(-design.md) 같은 단발 프론트 키워드가 backend=0을 이겨
+    # 도메인을 뒤집지 않도록, frontend는 신호 2개 이상일 때만 택한다.
+    if scores["frontend"] >= 2 and scores["frontend"] > scores["backend"]:
+        chosen = "frontend"
+    else:
+        chosen = "backend"
     confidence = 0.6
     reason = f"Implementation intent overrode docs routing ({len(impl_intent)} intent keyword(s)); scores {scores}."
 ```
@@ -68,8 +73,10 @@ if chosen == "docs" and impl_intent:
 - `chosen`이 이미 backend/frontend면 건드리지 않는다(오분류는 docs일 때만).
 - 이후 기존 `db_score>0 → backend+db+high`, `high_risk_score>0 → high` 블록이 그대로
   이어져 강화한다.
-- backend/frontend 결정은 **기존 점수 재사용**(frontend가 더 높으면 frontend, 아니면
-  backend). 둘 다 0이면 backend(구현 기본).
+- backend/frontend 결정: frontend 신호가 **2개 이상**이고 backend보다 높을 때만
+  frontend, 그 외에는 backend(구현 기본). 이유: `...-design.md` 스펙을 참조하는 구현
+  요청에서 파일명의 `design` 하나가 frontend=1을 만들어 backend=0을 이기는 오분류를
+  막기 위함(검증에서 실제 발견해 규칙을 보강함).
 
 ### 안전 비대칭 (설계 근거)
 
@@ -86,6 +93,7 @@ if chosen == "docs" and impl_intent:
 | 요청 | 현재 | 개선 후 |
 |---|---|---|
 | `"docs/specs/x.md 설계대로 구현하라"` | docs (no-op) | **backend** |
+| `"docs/specs/...-design.md 설계대로 구현하라"` | docs (no-op) | **backend** (파일명 `design`에도 불구) |
 | `"config.py에 --project 인자 추가"` | docs (신호0 기본) | **backend** |
 | `"UI 컴포넌트 구현"` | frontend | frontend (불변) |
 | `"README 업데이트"` | docs | docs (불변 — update 제외) |
@@ -121,12 +129,15 @@ if chosen == "docs" and impl_intent:
 from autoagent.routing import route_task
 cases = [
     ("docs/specs/x.md 설계대로 구현하라", "backend"),   # 교정 대상
+    ("docs/specs/...-design.md 설계대로 구현하라", "backend"),  # 파일명 design에도 backend
     ("config.py에 --project 인자 추가", "backend"),
     ("UI 컴포넌트 구현", "frontend"),
     ("README 업데이트", "docs"),                          # 회귀 없음
     ("이 PR 리뷰해줘", "docs"),
     ("API 엔드포인트 추가", "backend"),
     ("그냥 인사", "docs"),                                 # 신호0+의도0 → 안전 기본
+    # docs가 최고점이어도 frontend 신호 2+면 오버라이드로 frontend 도달
+    ("readme spec docs architecture css layout page 구현", "frontend"),
 ]
 for req, want in cases:
     got = route_task("auto", req)["task_type"]

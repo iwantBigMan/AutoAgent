@@ -6,6 +6,7 @@ DB 관련 용어가 있으면 subtype=db·risk_level=high로 고정(승인 게�
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -64,6 +65,29 @@ CODEX_IMPLEMENTER_TERMS = [
     "빌드 에러",
     "수정해줘",
 ]
+# auto 라우팅의 "구현 의도" 감지용 동사 목록.
+# 명사 점수가 docs를 가리켜도 아래 구현 의도가 있으면 backend/frontend로 되돌린다.
+# 한국어는 조사가 붙어도 안전한 부분일치(substring) 매칭.
+KO_IMPL_INTENT_TERMS = [
+    "구현",
+    "수정",
+    "추가",
+    "삭제",
+    "제거",
+    "교체",
+    "리팩터",
+    "리팩토링",
+    "반영",
+    "만들",
+    "고쳐",
+    "바꿔",
+    "통합",
+]
+# 영어는 \b 단어경계 정규식으로 오염 방지(prefix→fix, address→add 오매칭 차단).
+# update/write/review/document는 문서·리뷰 신호라 의도 목록에서 의도적으로 제외한다.
+EN_IMPL_INTENT_PATTERN = re.compile(
+    r"\b(?:implement|refactor|rewrite|integrate|fix|add|remove|build|create|rename|wire)\b"
+)
 
 
 def route_task(task_type: str, request: str, requested_implementer: str = "auto") -> dict[str, Any]:
@@ -136,6 +160,26 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
             total = sum(scores.values())
             confidence = round(max(0.55, scores[chosen] / max(total, 1)), 2)
             reason = f"Keyword routing scores: {scores}."
+
+        # 구현 의도 가드: 명사 점수가 docs를 가리켜도 구현 동사가 있으면
+        # backend/frontend 구현 라우트로 되돌린다(read-only no-op 오분류 교정).
+        # db_score/high_risk_score 오버라이드보다 반드시 앞에 둔다.
+        ko_intent = [term for term in KO_IMPL_INTENT_TERMS if term in lowered]
+        en_intent = EN_IMPL_INTENT_PATTERN.findall(lowered)
+        impl_intent = ko_intent + en_intent
+        if chosen == "docs" and impl_intent:
+            # 구현 라우트로 되돌린다. 단, 파일명 속 'design'(-design.md) 같은 단발 프론트
+            # 키워드가 backend=0을 이겨 frontend로 도메인을 뒤집는 오분류를 막는다.
+            # frontend는 신호 2개 이상 확실할 때만 택하고, 그 외에는 backend(구현 기본).
+            if scores["frontend"] >= 2 and scores["frontend"] > scores["backend"]:
+                chosen = "frontend"
+            else:
+                chosen = "backend"
+            confidence = 0.6
+            reason = (
+                f"Implementation intent overrode docs routing "
+                f"({len(impl_intent)} intent keyword(s)); scores {scores}."
+            )
 
         if db_score > 0:
             chosen = "backend"
