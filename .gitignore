@@ -4,3 +4,4 @@ __pycache__/
 autoagent.config.json
 runs/*/
 !runs/.gitkeep
+roles.json

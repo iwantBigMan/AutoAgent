@@ -84,6 +84,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     config = load_config(Path(args.config))
+    from autoagent.roles import load_roles, validate_roles
+    validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent)
     if args.workspace:
         config.workspace = Path(args.workspace)
 
