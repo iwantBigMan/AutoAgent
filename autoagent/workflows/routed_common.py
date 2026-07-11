@@ -37,11 +37,13 @@ def block_implementation(run_dir: Path, git_message: str) -> int:
 def resume_command_for(run_dir: Path) -> str:
     """게이트에서 정지한 run을 구현 단계로 이어가는 표준 재개 명령 문자열.
 
-    run_dir은 절대경로(ROOT/runs/<stamp>)이므로 run.py도 그 위치에서 도출한다.
+    run_dir은 프로젝트 유무에 따라 ROOT/runs/<stamp> 또는
+    ROOT/projects/<name>/runs/<stamp>일 수 있어 run_dir 기준 상대 위치로는 run.py를
+    찾을 수 없다. DEFAULT_CONFIG.parent(=ROOT, cli.py의 roles 로딩과 같은 결합)로 고정한다.
     어느 cwd에서든 그대로 붙여넣어 실행할 수 있게 절대경로를 쌍따옴표로 감싼다.
     --resume는 checkpoint.json에서 workspace를 복원하므로 --workspace가 필요 없다.
     """
-    run_py = run_dir.parent.parent / "run.py"
+    run_py = DEFAULT_CONFIG.parent / "run.py"
     return f'python "{run_py}" --resume "{run_dir}"'
 
 

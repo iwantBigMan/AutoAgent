@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--request", help="Task request text")
     parser.add_argument("--request-file", help="Path to a markdown request file")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to config JSON")
+    parser.add_argument("--project", help="Project registry name under projects/<name>/ (config + runs)")
     parser.add_argument("--workspace", help="Override target workspace path")
     parser.add_argument("--workflow", choices=["simple", "routed", "decompose"], default="simple", help="Workflow to run")
     parser.add_argument(
@@ -83,7 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = load_config(Path(args.config))
+    config = load_config(Path(args.config), project=args.project)
     from autoagent.roles import load_roles, validate_roles
     validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent)
     if args.workspace:
@@ -103,11 +104,12 @@ def main() -> int:
     if not request:
         raise SystemExit("Request is empty.")
 
-    run_dir = make_run_dir()
+    run_dir = make_run_dir(project=args.project)
     write_text(run_dir / "00_request.md", request)
     write_metadata(
         run_dir,
         {
+            "project": args.project,
             "workspace": str(config.workspace),
             "created_at": datetime.now().isoformat(timespec="seconds"),
             "workflow": args.workflow,

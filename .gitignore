@@ -5,3 +5,7 @@ autoagent.config.json
 runs/*/
 !runs/.gitkeep
 roles.json
+projects/*/runs/
+projects/*/config.json
+!projects/_example/config.json
+!projects/.gitkeep

@@ -101,6 +101,9 @@ runs 루트를 프로젝트별로 분기한다.
 - `make_run_dir(project: str | None = None) -> Path`
 - 베이스 = `project`이면 `ROOT/projects/<project>/runs`, 아니면 기존 `ROOT/runs`.
 - 나머지(타임스탬프·충돌 시 `_NN` 접미사) 로직은 그대로.
+- **경로 이탈 방지**: `validate_project_name(project)`로 빈 문자열/`.`/`..`/`/`/`\`를 거부해
+  `projects/<name>` 경계를 벗어나지 못하게 한다. `config.py`도 같은 함수를 재사용한다.
+  두 곳 모두 `if project is not None:`으로 분기해 명시적 빈 문자열도 에러가 되게 한다.
 
 ### 3) `autoagent/cli.py — main / build_parser`
 
@@ -110,12 +113,18 @@ runs 루트를 프로젝트별로 분기한다.
 - `--workspace`는 기존대로 병합 후 최상위 오버라이드로 유지(`cli.py:89`).
 - 메타데이터(`write_metadata`)에 `"project": args.project` 추가.
 
-### 4) `--resume` (변경 없음)
+### 4) `--resume` + `routed_common.resume_command_for`
 
 `resume_routed_workflow`는 `args.resume`의 run_dir(절대경로)만 보고
 `checkpoint.json`에서 workspace를 복원하며 `make_run_dir`를 호출하지 않는다
-(`routed.py:77-92`). 따라서 프로젝트별 runs와 무관하게 그대로 동작한다.
-**플랜에서 dry-run으로 재확인만 한다.**
+(`routed.py:77-92`). 따라서 재개 경로 자체는 프로젝트별 runs와 무관하게 동작한다.
+
+단, 게이트에서 재개 명령 문자열을 만드는 `resume_command_for`는 원래
+`run_dir.parent.parent / "run.py"`로 run.py를 도출했는데, 이는 runs가 ROOT 2단계
+아래(`ROOT/runs/<stamp>`)라는 가정이다. 프로젝트 runs는 3단계 아래
+(`ROOT/projects/<name>/runs/<stamp>`)라 도출이 깨진다. 그래서 `DEFAULT_CONFIG.parent`
+(=ROOT)로 고정한다. 무프로젝트 경로에선 결과가 동일해 하위호환을 유지한다.
+(원 설계는 "resume 변경 없음"으로 봤으나 구현 중 이 갭을 발견해 반영.)
 
 ### 5) `.gitignore`
 
@@ -155,6 +164,7 @@ run.py --workspace C:\...\OtherProject --request "..."
 
 ## 에러 처리
 
+- `--project` 값이 빈 문자열/`.`/`..`/경로 구분자(`/`·`\`) 포함 → `Invalid project name` `SystemExit`.
 - `--project` 지정했는데 `projects/<name>/config.json` 없음 → 명확한 `SystemExit`.
 - 병합 후 `workspace`가 존재하지 않는 경로 → 기존 검사(`cli.py:99`) 그대로 걸림.
 - 프로젝트 config JSON 파싱 실패 → `json.loads` 예외 그대로 표면화(기존 전역 config와 동일 취급).
