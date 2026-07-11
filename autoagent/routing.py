@@ -90,6 +90,29 @@ EN_IMPL_INTENT_PATTERN = re.compile(
 )
 
 
+def db_term_count(text: str) -> int:
+    """DB_TERMS 중 요청에 등장한 개수. 'db' 코드 심볼(db_score) 오발만 좁게 배제한다.
+
+    이건 승인 게이트의 입력이라 실제 DB 용어 '누락'(under-match)이 최우선 위험이다.
+    그래서 대부분 용어는 느슨한 부분일치를 그대로 써서 'postgres'→postgresql,
+    'sql'→mysql, 'db'→mongodb 같은 결합어까지 계속 잡는다(과다발동은 안전 방향).
+    유일한 짧은 오발원 'db'만, snake_case 식별자(db_score, my_db 등 언더스코어 인접)일
+    때 제외한다. standalone 'db'와 결합어(mongodb)의 'db'는 계속 센다.
+
+    입력은 어떤 대소문자든 받아 내부에서 소문자화한다(공개 헬퍼 오용 방지).
+    """
+    lowered = text.lower()
+    count = 0
+    for term in DB_TERMS:
+        if term == "db":
+            # 언더스코어에 인접하지 않은 'db'만 센다(코드 식별자 조각 배제).
+            if re.search(r"(?<!_)db(?!_)", lowered):
+                count += 1
+        elif term in lowered:      # 나머지는 느슨한 부분일치(결합어·복수형 모두 포함)
+            count += 1
+    return count
+
+
 def route_task(task_type: str, request: str, requested_implementer: str = "auto") -> dict[str, Any]:
     """요청을 라우팅해 route dict를 만든다.
 
@@ -98,7 +121,7 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
     구현자/리뷰어는 choose_implementer가 정한다(리뷰어는 항상 구현자와 반대 모델).
     """
     lowered = request.lower()
-    db_score = sum(1 for term in DB_TERMS if term in lowered)
+    db_score = db_term_count(lowered)   # 기존 sum(... in lowered) substring 오발을 토큰 매칭으로 대체
     high_risk_score = sum(1 for term in HIGH_RISK_TERMS if term in lowered)
 
     if task_type != "auto":
