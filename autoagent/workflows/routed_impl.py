@@ -137,37 +137,19 @@ def run_implementation_route(
         f"rounds_configured: {max(args.max_review_rounds, 0)}\n",
     )
 
-    # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
-    # 그대로 쓴다(현행 버그를 의도적으로 보존 — 수정은 별도 계획에서 다룬다).
-    roles = load_roles(DEFAULT_CONFIG.parent)
-    final_review_role = resolve_role(
-        roles["final-review"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+    # 최종리뷰(07)는 routed와 실행기가 공유하는 헬퍼로 수행한다(DRY). stop_after는 호출부에 둔다.
+    final_review = run_final_review(
+        args=args,
+        config=config,
+        common=common,
+        route=route,
+        request=request,
+        budget=budget,
+        run_dir=run_dir,
+        implementation=implementation,
+        review=review,
+        fix=fix,
     )
-    final_review_prompt = render_template(
-        "codex_final.md",
-        {
-            **common,
-            "IMPLEMENTATION_RESULT": implementation,
-            "REVIEW_RESULT": review,
-            "FIX_RESULT": fix,
-        },
-    )
-    if args.dry_run:
-        write_text(run_dir / "07_codex_final_review_prompt.md", final_review_prompt)
-        write_command_artifact(run_dir, "07_codex_final_review", command_for_agent(config, final_review_role))
-        final_review = "[dry-run: Codex final review output]"
-    else:
-        codex = require_command(config.codex_command)
-        budget.before_call(next_step="final-review", out_dir=run_dir, dry_run=args.dry_run)
-        final_review = run_process(
-            name="07_codex_final_review",
-            command=command_for_agent(config, final_review_role, resolved_command=codex),
-            prompt=final_review_prompt,
-            cwd=config.workspace,
-            out_dir=run_dir,
-            timeout_seconds=config.timeout_seconds,
-        )
-        write_text(run_dir / "07_codex_final_review.md", final_review)
     if stop_after(args, run_dir, "final-review"):
         return 0
 
@@ -203,6 +185,53 @@ def run_implementation_route(
     stop_after(args, run_dir, "report")
     print(f"Routed run complete: {run_dir}")
     return 0
+
+
+def run_final_review(
+    *,
+    args: Namespace,
+    config: Config,
+    common: dict[str, Any],
+    route: dict[str, Any],
+    request: str,
+    budget: AgentCallBudget,
+    run_dir: Path,
+    implementation: str,
+    review: str,
+    fix: str,
+    name: str = "07_codex_final_review",
+) -> str:
+    """codex 최종리뷰(07). dry-run이면 프롬프트/커맨드만 렌더하고 [dry-run] 문자열 반환.
+
+    routed_impl의 기존 07 로직을 그대로 옮긴 것으로, routed와 실행기가 공유한다.
+    바이트 패리티: name 기본값·프롬프트 값·resolve_role 인자가 원본과 동일해야 한다.
+    """
+    # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
+    # 그대로 쓴다(현행 버그를 의도적으로 보존 — 수정은 별도 계획에서 다룬다).
+    roles = load_roles(DEFAULT_CONFIG.parent)
+    final_review_role = resolve_role(
+        roles["final-review"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+    )
+    final_review_prompt = render_template(
+        "codex_final.md",
+        {**common, "IMPLEMENTATION_RESULT": implementation, "REVIEW_RESULT": review, "FIX_RESULT": fix},
+    )
+    if args.dry_run:
+        write_text(run_dir / f"{name}_prompt.md", final_review_prompt)
+        write_command_artifact(run_dir, name, command_for_agent(config, final_review_role))
+        return "[dry-run: Codex final review output]"
+    codex = require_command(config.codex_command)
+    budget.before_call(next_step="final-review", out_dir=run_dir, dry_run=args.dry_run)
+    result = run_process(
+        name=name,
+        command=command_for_agent(config, final_review_role, resolved_command=codex),
+        prompt=final_review_prompt,
+        cwd=config.workspace,
+        out_dir=run_dir,
+        timeout_seconds=config.timeout_seconds,
+    )
+    write_text(run_dir / f"{name}.md", result)
+    return result
 
 
 def run_role_step(

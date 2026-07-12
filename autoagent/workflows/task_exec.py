@@ -267,78 +267,122 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
     # worktree 헬퍼는 함수 내부에서 지연 import한다(모듈 로드 순서/순환 회피).
     from autoagent import worktree as wt
 
-    task_graph = load_task_graph(run_dir)
-    tasks = task_graph.get("tasks", []) or []
+    try:
+        task_graph = load_task_graph(run_dir)
+        tasks = task_graph.get("tasks", []) or []
 
-    # baseline 안전 확인: 타깃 워킹트리가 커밋된 HEAD를 가져야 격리 worktree가 깨끗하다.
-    if not args.dry_run:
-        ok, git_message = git_baseline_status(config.workspace)
-        write_text(run_dir / "git_baseline_status.txt", git_message)
-        if not ok:
-            return block_implementation(run_dir, git_message)
+        # baseline 안전 확인: 타깃 워킹트리가 커밋된 HEAD를 가져야 격리 worktree가 깨끗하다.
+        if not args.dry_run:
+            ok, git_message = git_baseline_status(config.workspace)
+            write_text(run_dir / "git_baseline_status.txt", git_message)
+            if not ok:
+                return block_implementation(run_dir, git_message)
 
-    waves = topological_waves(tasks)  # 순환이면 여기서 SystemExit
-    write_text(run_dir / "waves.txt", "\n".join(" ".join(w) for w in waves) + "\n")
+        waves = topological_waves(tasks)  # 순환이면 여기서 SystemExit
+        write_text(run_dir / "waves.txt", "\n".join(" ".join(w) for w in waves) + "\n")
 
-    overlaps = wt.warn_path_overlap(tasks)
-    if overlaps:
-        write_text(run_dir / "path_overlap_warnings.md",
-                   "# allowed_paths 겹침 경고\n\n" + "\n".join(f"- {w}" for w in overlaps) + "\n")
+        overlaps = wt.warn_path_overlap(tasks)
+        if overlaps:
+            write_text(run_dir / "path_overlap_warnings.md",
+                       "# allowed_paths 겹침 경고\n\n" + "\n".join(f"- {w}" for w in overlaps) + "\n")
 
-    budget = AgentCallBudget(args.max_agent_calls)
+        budget = AgentCallBudget(args.max_agent_calls)
 
-    stamp = time.strftime("%Y%m%d_%H%M%S")
-    baseline = "HEAD"
-    by_id = {t.get("id"): t for t in tasks}
-    failed = False
-    budget_stopped = False
-    for wave in waves:
-        if budget_stopped:
-            break  # 예산 소진 후 새 파도 시작 안 함(스펙 §333).
-        results: dict[str, str] = {}
-        with ThreadPoolExecutor(max_workers=max(config.max_parallel_lanes, 1)) as pool:
-            futures = {}
-            for node_id in wave:
-                node = by_id[node_id]
-                set_status(run_dir, task_graph, node_id, "in_progress")
-                futures[pool.submit(
-                    run_node, args=args, config=config, task_graph=task_graph,
-                    node=node, budget=budget, run_dir=run_dir, stamp=stamp, baseline=baseline,
-                )] = node_id
-            for fut, node_id in futures.items():
-                results[node_id] = fut.result()  # run_node가 예외를 삼켜 문자열로 반환
-        for node_id, status in results.items():
-            if status in {"done", "skipped"}:
-                set_status(run_dir, task_graph, node_id, status)
-            elif status == "budget_stopped":
-                # 예산 소진 노드는 pending으로 되돌려 재개 대상으로 남긴다(스펙 §113).
-                set_status(run_dir, task_graph, node_id, "pending")
-                budget_stopped = True
-            else:  # "failed"
-                set_status(run_dir, task_graph, node_id, "failed")
-                failed = True
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        baseline = "HEAD"
+        by_id = {t.get("id"): t for t in tasks}
+        failed = False
+        budget_stopped = False
+        for wave in waves:
+            if budget_stopped:
+                break  # 예산 소진 후 새 파도 시작 안 함(스펙 §333).
+            results: dict[str, str] = {}
+            with ThreadPoolExecutor(max_workers=max(config.max_parallel_lanes, 1)) as pool:
+                futures = {}
+                for node_id in wave:
+                    node = by_id[node_id]
+                    set_status(run_dir, task_graph, node_id, "in_progress")
+                    futures[pool.submit(
+                        run_node, args=args, config=config, task_graph=task_graph,
+                        node=node, budget=budget, run_dir=run_dir, stamp=stamp, baseline=baseline,
+                    )] = node_id
+                for fut, node_id in futures.items():
+                    results[node_id] = fut.result()  # run_node가 예외를 삼켜 문자열로 반환
+            for node_id, status in results.items():
+                if status in {"done", "skipped"}:
+                    set_status(run_dir, task_graph, node_id, status)
+                elif status == "budget_stopped":
+                    # 예산 소진 노드는 pending으로 되돌려 재개 대상으로 남긴다(스펙 §113).
+                    set_status(run_dir, task_graph, node_id, "pending")
+                    budget_stopped = True
+                else:  # "failed"
+                    set_status(run_dir, task_graph, node_id, "failed")
+                    failed = True
+            if failed:
+                break  # 실제 실패면 안전편향 정지: 다음 파도 시작 안 함(barrier에서 멈춤).
+
+        _write_skipped_report(run_dir, tasks)
+
+        if args.dry_run:
+            write_text(run_dir / "final_report.md", "# Task Graph dry-run 완료\n\n노드 프롬프트만 렌더했습니다.\n")
+            print(f"Task graph dry-run complete: {run_dir}")
+            return 0
+
         if failed:
-            break  # 실제 실패면 안전편향 정지: 다음 파도 시작 안 함(barrier에서 멈춤).
+            _mark_blocked_descendants(run_dir, task_graph)
 
-    _write_skipped_report(run_dir, tasks)
+        integrated, integration_branch = _integrate_and_cleanup(
+            args, config, run_dir, tasks, stamp, baseline, failed, budget_stopped,
+        )
+        if not integrated:
+            write_text(run_dir / "final_report.md",
+                       "# Task Graph 실행 정지\n\n통합하지 못했습니다. integration_report.md를 보세요.\n"
+                       f"worktree/브랜치를 보존합니다: {run_dir / 'worktrees'}\n")
+            print(f"Task graph run stopped without integration: {run_dir}")
+            return 0
 
-    if args.dry_run:
-        write_text(run_dir / "final_report.md", "# Task Graph dry-run 완료\n\n노드 프롬프트만 렌더했습니다.\n")
-        print(f"Task graph dry-run complete: {run_dir}")
+        # 통합 트리에 대해 run 레벨 1회: 최종리뷰(codex 07) → 평가(codex 08) → 최종보고(claude 09).
+        integ_wt = run_dir / "worktrees" / "_integration"
+        integ_config = dataclasses.replace(config, workspace=integ_wt)
+        run_route = route_task("backend", task_graph.get("goal", ""), "auto")
+        common = {
+            "REQUEST": task_graph.get("goal", ""),
+            "WORKSPACE": str(integ_wt),
+            "TASK_TYPE": run_route["task_type"],
+            "ROUTE_JSON": json.dumps(run_route, ensure_ascii=False, indent=2),
+            "MAX_REVIEW_ROUNDS": str(max(args.max_review_rounds, 0)),
+            "CLAUDE_CONTEXT": task_graph.get("goal", ""),
+            "CLAUDE_ARCHITECTURE": "\n".join(t.get("title", "") for t in tasks),
+            "CODEX_VALIDATION": "\n".join(
+                cmd for t in tasks for cmd in (t.get("validation_commands") or [])
+            ),
+        }
+
+        from autoagent.workflows.routed_impl import run_final_review  # 지연 import(순환 회피)
+        final_review = run_final_review(
+            args=args, config=integ_config, common=common, route=run_route,
+            request=common["REQUEST"], budget=budget, run_dir=run_dir,
+            implementation="통합 브랜치 트리", review="-", fix="-",
+        )
+        evaluation = run_evaluation(
+            args, integ_config, common, budget, run_dir,
+            name="08_codex_evaluation",
+            implementation="통합 브랜치 트리", review="-", fix="-", final_review=final_review,
+        )
+        final = run_final_report(
+            args, integ_config, common, budget, run_dir,
+            name="09_claude_final_report",
+            implementation="통합 브랜치 트리", review="-", fix="-",
+            final_review=final_review, evaluation=evaluation,
+        )
+        write_text(run_dir / "final_report.md", final)
+
+        _cleanup_lanes(config, run_dir, tasks, stamp)
+        print(f"Task graph execution complete: {run_dir} (통합 브랜치 {integration_branch})")
         return 0
-
-    if failed:
-        _mark_blocked_descendants(run_dir, task_graph)
-
-    integrated, integration_branch = _integrate_and_cleanup(
-        args, config, run_dir, tasks, stamp, baseline, failed, budget_stopped,
-    )
-    if not integrated:
+    except AgentCallBudgetStopped as stopped:
         write_text(run_dir / "final_report.md",
-                   "# Task Graph 실행 정지\n\n통합하지 못했습니다. integration_report.md를 보세요.\n"
-                   f"worktree/브랜치를 보존합니다: {run_dir / 'worktrees'}\n")
-        print(f"Task graph run stopped without integration: {run_dir}")
+                   f"# 예산 소진 정지\n\nbefore {stopped.next_step}에서 예산이 소진돼 정지했습니다. "
+                   "--resume로 이어갈 수 있습니다.\n")
+        print(f"Task graph run stopped by budget before {stopped.next_step}: {run_dir}")
         return 0
-
-    # 7d에서 통합 평가/리포트를 채운 뒤 정리한다.
-    return 0
