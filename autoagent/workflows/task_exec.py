@@ -203,7 +203,10 @@ def _integrate_and_cleanup(
     # worktree 헬퍼는 함수 내부에서 지연 import한다(모듈 로드 순서/순환 회피).
     from autoagent import worktree as wt
 
-    integration_branch = f"aa/{stamp}"
+    # 레인 브랜치는 aa/<stamp>/<id> 네임스페이스(=refs/heads/aa/<stamp>/ 디렉터리)를 쓰므로,
+    # 통합 브랜치를 aa/<stamp>(=같은 경로의 파일)로 두면 git ref D/F 충돌로 branch 생성이 실패한다.
+    # 별도 최상위 네임스페이스로 분리해 충돌을 피한다.
+    integration_branch = f"aa-integration/{stamp}"
     if failed or budget_stopped:
         # 안전편향: 실패/예산소진/블록이 있으면 통합하지 않고 전체 보존.
         reason = "실패 노드" if failed else "예산 소진"
