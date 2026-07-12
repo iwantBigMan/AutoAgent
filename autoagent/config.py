@@ -33,6 +33,7 @@ class Config:
     codex_reasoning_effort: str
     default_max_agent_calls_review: int
     default_max_agent_calls_implementation: int
+    max_parallel_lanes: int = 2
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
@@ -85,4 +86,5 @@ def load_config(path: Path, project: str | None = None) -> Config:
         codex_reasoning_effort=raw.get("codex_reasoning_effort") or "high",
         default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
         default_max_agent_calls_implementation=int(raw.get("default_max_agent_calls_implementation") or 9),
+        max_parallel_lanes=int(raw.get("max_parallel_lanes") or 2),
     )
