@@ -46,9 +46,11 @@ def warn_path_overlap(nodes: list[dict[str, Any]]) -> list[str]:
 
 
 def scope_violations(target: Path, worktree: Path, allowed: list[str], blocked: list[str]) -> list[str]:
-    # worktree에서 baseline(HEAD) 대비 변경된 파일이 allowed_paths 밖(또는 blocked_paths 안)이면 플래그.
+    # worktree에서 staged된(git add -A 이후) 변경 파일이 allowed_paths 밖(또는 blocked_paths 안)이면 플래그.
+    # git diff --cached는 신규(untracked) 파일도 staged로 잡으므로, 커밋 전 신규 파일 스코프 검사가 유효하다(imp 5).
+    # (git diff HEAD는 untracked 신규 파일을 누락한다.)
     proc = subprocess.run(
-        ["git", "-C", str(worktree), "diff", "--name-only", "HEAD"],
+        ["git", "-C", str(worktree), "diff", "--cached", "--name-only"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
@@ -81,6 +83,12 @@ def remove_worktree(target: Path, path: Path) -> None:
 def delete_branch(target: Path, branch: str) -> None:
     # 레인 브랜치 삭제(통합 후 정리). 이미 없으면 무해하게 넘어간다.
     _git(target, "branch", "-D", branch)
+
+
+def branch_exists(target: Path, branch: str) -> bool:
+    # 레인 브랜치가 이미 있는지 확인(재개 시 멱등 재-add 판단용, crit 4).
+    proc = _git(target, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")
+    return proc.returncode == 0
 
 
 def create_integration_branch(target: Path, name: str, baseline: str) -> None:
