@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from autoagent.config import load_config
 from autoagent.workflows.decompose import run_decompose_workflow
 from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
 from autoagent.workflows.simple import run_simple_workflow
+from autoagent.workflows.task_exec import run_task_graph_execution
 
 
 def load_request(args: argparse.Namespace) -> str:
@@ -26,6 +28,19 @@ def load_request(args: argparse.Namespace) -> str:
     if not sys.stdin.isatty():
         return sys.stdin.read()
     raise SystemExit("Provide a request with --request, --request-file, or stdin.")
+
+
+def resume_mode(run_dir: Path) -> str:
+    """checkpoint.json의 mode를 읽어 재개 분기 키를 돌려준다.
+
+    mode가 없거나 "routed_impl"이면 기존 routed 재개(하위호환 기본),
+    "task_graph"이면 decompose 병렬 실행기로 간다.
+    """
+    checkpoint_path = run_dir / "checkpoint.json"
+    if not checkpoint_path.exists():
+        raise SystemExit(f"No checkpoint.json in {run_dir}; cannot resume.")
+    checkpoint = json.loads(read_text(checkpoint_path))
+    return checkpoint.get("mode") or "routed_impl"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,6 +110,10 @@ def main() -> int:
     if args.resume:
         if args.request or args.request_file:
             raise SystemExit("--resume cannot be combined with --request/--request-file.")
+        run_dir = Path(args.resume)
+        mode = resume_mode(run_dir)
+        if mode == "task_graph":
+            return run_task_graph_execution(args, config, run_dir)
         return resume_routed_workflow(args, config)
 
     if not config.workspace.exists():
