@@ -34,7 +34,7 @@
 2. **한국어 문서/주석**: 모든 신규 모듈은 한국어 docstring으로 시작하고, 모든 함수는 한국어 인라인 주석을 단다(식별자만 영문). 기존 스타일과 일치.
 3. **타입/스타일**: 모든 신규 모듈은 `from __future__ import annotations`로 시작, PEP604 유니언(`str | None`) 사용, config/state 묶음은 dataclass.
 4. **리뷰어=구현자 반대 모델 불변식**: 노드 route는 `route_task(node["type"], node.get("description", ""), "auto")`로 파생하며, 이는 `choose_implementer`가 정한 `implementation_agent`/`review_agent`(항상 반대 모델)를 그대로 담는다. 노드 실행은 `run_impl_review_fix`를 통해 이 route를 소비하므로 불변식이 자동 유지된다. 직접 모델을 지정하지 않는다.
-5. **main 브랜치·push 절대 안 건드림**: 실행기는 타깃 레포에 `aa/<stamp>/<id>` 레인 브랜치와 `aa/<stamp>` 통합 브랜치만 만들고, worktree/레인 브랜치는 성공 시 정리한다. 통합 브랜치만 남긴다. `git push`·`main` 병합은 절대 호출하지 않는다.
+5. **main 브랜치·push 절대 안 건드림**: 실행기는 타깃 레포에 `aa/<stamp>/<id>` 레인 브랜치와 `aa-integration/<stamp>` 통합 브랜치만 만들고(통합은 레인과 ref 네임스페이스가 겹치지 않게 별도 접두), worktree/레인 브랜치는 성공 시 정리한다. 통합 브랜치만 남긴다. `git push`·`main` 병합은 절대 호출하지 않는다.
 6. **서브프로세스 cwd=config.workspace 격리**: `run_role_step`(및 `run_impl_review_fix`)이 `cwd=config.workspace`를 쓰므로, 노드마다 `dataclasses.replace(config, workspace=<worktree 경로>)`로 **Config 사본**을 만들어 넘긴다. 전역 `config`는 절대 변형하지 않는다(병렬 레인이 서로 밟지 않게).
 7. **실행되는 노드 타입 범위**: decompose 스키마의 노드 `type` 어휘는 `backend`/`frontend`/`docs`/`review`/`test`/`db`/`infra`이지만, **현재 실행기는 `backend`/`frontend` 노드만 레인으로 구현한다**(그 외 프롬프트 파일이 없음 — `PROMPT_ALIASES`에 backend/frontend만 존재, `db`/`test`/`infra` route는 `claude_db_impl.md` 등 없는 경로를 열어 크래시). `db` 타입 노드는 `_node_route`에서 `backend`로 정규화해 실행하고(스키마상 db는 유효 코드-생성 후보이며 `route_task`가 db 키워드로 subtype=db/risk_level=high를 도출), `docs`/`review`/`test`/`infra` 타입 노드는 **skip 처리하되 사용자에게 보이는 리포트(`skipped_nodes.md` 및 `final_report.md`)에 "승인했으나 미실행" 노드 목록을 명시**해 은닉 커버리지 갭을 드러낸다. 이 결정은 스펙 §345("backend/frontend/docs/review 4종")를 db 정규화로 확장한 것으로, 계획에 명시적으로 못박는다.
 
@@ -1092,7 +1092,7 @@
        stamp: str, baseline: str, failed: bool, budget_stopped: bool,
    ) -> tuple[bool, str]:
        """완료 레인을 통합 브랜치로 순차 병합하고 성공 시 정리한다. (통합성공여부, 통합브랜치명) 반환."""
-       integration_branch = f"aa/{stamp}"
+       integration_branch = f"aa-integration/{stamp}"  # 레인 aa/<stamp>/<id>와 ref D/F 충돌 회피
        if failed or budget_stopped:
            # 안전편향: 실패/예산소진/블록이 있으면 통합하지 않고 전체 보존.
            reason = "실패 노드" if failed else "예산 소진"

@@ -164,7 +164,9 @@ db·high-risk 노드가 기존 roles 레지스트리(`resolve_role`)를 통해 x
 
 ### 통합 & 출력
 
-- **통합 브랜치** `aa/<stamp>`를 baseline에서 만든다. 완료된 레인 브랜치를
+- **통합 브랜치** `aa-integration/<stamp>`를 baseline에서 만든다(레인 브랜치가
+  `aa/<stamp>/<id>` 네임스페이스=refs/heads/aa/<stamp>/ 디렉터리를 점유하므로 통합을
+  `aa/<stamp>` 파일 ref로 두면 git D/F 충돌 — 별도 네임스페이스로 회피). 완료된 레인 브랜치를
   노드 id 순(위상 순)으로 순차 `git merge`.
 - **충돌 = stop-and-report**: 병합 중 충돌 시 즉시 중단, 해당 병합을 abort하고
   충돌 파일 목록·레인 브랜치·worktree를 **보존**한 채 "수동 병합 필요" 리포트.
@@ -172,7 +174,7 @@ db·high-risk 노드가 기존 roles 레지스트리(`resolve_role`)를 통해 x
 - **겹침 경고(얕은 가드)**: 파도 실행 **전에** 노드들의 `allowed_paths`를 비교해
   겹치는 경로가 있으면 경고를 리포트에 남긴다(차단은 아님 — 구조적 강제는 범위 밖).
 - **성공 정리**: 통합·평가까지 끝나면 worktree 제거(`git worktree remove`) +
-  레인 브랜치 삭제(`git branch -D aa/<stamp>/<id>`). 통합 브랜치 `aa/<stamp>`는
+  레인 브랜치 삭제(`git branch -D aa/<stamp>/<id>`). 통합 브랜치 `aa-integration/<stamp>`는
   **남긴다**(사람 리뷰 대상). **실패 시 전부 보존**하고 경로를 리포트.
 
 ### 통합 평가 & 리포트 (run 1회)
@@ -320,7 +322,7 @@ task_graph: n1(db, deps=[])  n2(backend, deps=[n1])  n3(frontend, deps=[n1])
 - `--workflow routed`/`simple`은 전혀 영향 없음(코어 추출은 순수 이동, 바이트 동일
   게이트로 보증).
 - 타깃 레포: 실행기는 worktree·브랜치를 **추가했다가 정리**하고, 통합 브랜치
-  `aa/<stamp>`만 남긴다. **main·push는 절대 건드리지 않는다.**
+  `aa-integration/<stamp>`만 남긴다. **main·push는 절대 건드리지 않는다.**
 
 ## 에러 처리
 
