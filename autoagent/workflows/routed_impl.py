@@ -18,7 +18,8 @@ from autoagent.safety import review_needs_changes
 from autoagent.workflows.routed_common import run_evaluation, run_final_report, stop_after
 
 
-def run_implementation_route(
+def run_impl_review_fix(
+    *,
     args: Namespace,
     config: Config,
     common: dict[str, Any],
@@ -26,7 +27,12 @@ def run_implementation_route(
     request: str,
     budget: AgentCallBudget,
     run_dir: Path,
-) -> int:
+) -> tuple[str, str, str, bool, bool]:
+    """구현(04) -> 리뷰/수정 반복(05/06)을 돌고 (implementation, review, fix, resolved, stopped)를 반환.
+
+    stop_after가 implementation/review 단계에서 실제로 매치되면 그 시점 부분 상태와 stopped=True를,
+    아니면 최종 상태와 stopped=False를 돌려준다. stopped_after.md 기록은 여기서 1회만 한다.
+    """
     # 라우트가 정한 구현자/리뷰어(서로 반대 모델)로 구현 단계를 수행한다.
     task_type = route["task_type"]
     implementation_agent = route["implementation_agent"]
@@ -48,9 +54,7 @@ def run_implementation_route(
         request=request,
         mutating=True,
     )
-    if stop_after(args, run_dir, "implementation"):
-        return 0
-
+    # 원본 순서 보존: 리뷰/수정 기본값과 resolved(rounds==0)를 루프 전에 세팅.
     # 리뷰-수정을 max_review_rounds만큼 반복한다. 리뷰가 통과하면 조기 종료하고,
     # 소진되면 마지막 수정본을 재검증 없이 다음 단계로 넘긴다(spec 3.4).
     rounds = max(args.max_review_rounds, 0)
@@ -58,6 +62,9 @@ def run_implementation_route(
     review = "Review skipped (max_review_rounds=0)."
     fix = "No fix step was run."
     resolved = rounds == 0
+    if stop_after(args, run_dir, "implementation"):
+        return current_impl, review, fix, resolved, True
+
     for r in range(1, rounds + 1):
         review = run_role_step(
             args=args,
@@ -76,7 +83,7 @@ def run_implementation_route(
             mutating=False,
         )
         if stop_after(args, run_dir, "review"):
-            return 0
+            return current_impl, review, fix, resolved, True
         if not review_needs_changes(review):
             resolved = True
             break
@@ -98,12 +105,36 @@ def run_implementation_route(
         )
         current_impl = fix
 
+    return current_impl, review, fix, resolved, False
+
+
+def run_implementation_route(
+    args: Namespace,
+    config: Config,
+    common: dict[str, Any],
+    route: dict[str, Any],
+    request: str,
+    budget: AgentCallBudget,
+    run_dir: Path,
+) -> int:
+    # 구현->리뷰/수정 코어를 헬퍼로 돌리고, 헬퍼가 실제로 정지했을 때만 꼬리를 건너뛴다.
+    implementation, review, fix, resolved, stopped = run_impl_review_fix(
+        args=args,
+        config=config,
+        common=common,
+        route=route,
+        request=request,
+        budget=budget,
+        run_dir=run_dir,
+    )
+    if stopped:
+        return 0
+
     # 이후 최종리뷰/평가/보고는 최신 반영본 기준으로 진행한다.
-    implementation = current_impl
     write_text(
         run_dir / "review_loop_status.md",
         f"resolved: {str(resolved).lower()}\n"
-        f"rounds_configured: {rounds}\n",
+        f"rounds_configured: {max(args.max_review_rounds, 0)}\n",
     )
 
     # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
