@@ -165,6 +165,100 @@ def run_node(
     return "done"
 
 
+def _mark_blocked_descendants(run_dir: Path, task_graph: dict[str, Any]) -> None:
+    # 실제 failed/미완 노드에 (직간접) 의존하는 미완 노드를 blocked로 표시한다.
+    tasks = task_graph.get("tasks", [])
+    bad = {t.get("id") for t in tasks if t.get("status") in {"failed", "in_progress"}}
+    changed = True
+    while changed:
+        changed = False
+        for t in tasks:
+            if t.get("status") in {"done", "skipped", "blocked", "failed"}:
+                continue
+            if any(dep in bad for dep in (t.get("dependencies") or [])):
+                t["status"] = "blocked"
+                bad.add(t.get("id"))
+                changed = True
+    persist_status(run_dir, task_graph)
+
+
+def _write_skipped_report(run_dir: Path, tasks: list[dict[str, Any]]) -> None:
+    # 승인했으나 미실행(skip)된 노드를 사람이 인지하도록 명시(Global Constraint 7).
+    skipped = [t for t in tasks
+               if ("backend" if t.get("type") == "db" else t.get("type")) not in CODE_NODE_TYPES]
+    if not skipped:
+        return
+    lines = ["# 미실행 노드 (승인했으나 실행기가 구현하지 않음)\n"]
+    for t in skipped:
+        lines.append(f"- **{t.get('id')}** (type={t.get('type')}): {t.get('title', '')}")
+    lines.append("\n현재 실행기는 backend/frontend(및 db) 노드만 구현합니다.\n")
+    write_text(run_dir / "skipped_nodes.md", "\n".join(lines))
+
+
+def _integrate_and_cleanup(
+    args: Namespace, config: Config, run_dir: Path, tasks: list[dict[str, Any]],
+    stamp: str, baseline: str, failed: bool, budget_stopped: bool,
+) -> tuple[bool, str]:
+    """완료 레인을 통합 브랜치로 순차 병합하고 성공 시 정리한다. (통합성공여부, 통합브랜치명) 반환."""
+    # worktree 헬퍼는 함수 내부에서 지연 import한다(모듈 로드 순서/순환 회피).
+    from autoagent import worktree as wt
+
+    integration_branch = f"aa/{stamp}"
+    if failed or budget_stopped:
+        # 안전편향: 실패/예산소진/블록이 있으면 통합하지 않고 전체 보존.
+        reason = "실패 노드" if failed else "예산 소진"
+        write_text(run_dir / "integration_report.md",
+                   f"# 통합 생략(안전편향 정지: {reason})\n\n"
+                   "통합 병합을 하지 않고 worktree와 레인 브랜치를 모두 보존합니다.\n")
+        return False, integration_branch
+
+    # 통합 worktree를 baseline에서 만들고 그 안에서 순차 병합(레인 브랜치를 위상 순으로).
+    wt.create_integration_branch(config.workspace, integration_branch, baseline)
+    integ_wt = run_dir / "worktrees" / "_integration"
+    proc = subprocess.run(
+        ["git", "-C", str(config.workspace), "worktree", "add", str(integ_wt), integration_branch],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode != 0:
+        write_text(run_dir / "integration_report.md",
+                   f"# 통합 worktree 생성 실패\n\n{proc.stderr.strip() or proc.stdout.strip()}\n")
+        return False, integration_branch
+
+    merged: list[str] = []
+    done_ids = [t.get("id") for t in tasks
+                if t.get("status") == "done"
+                and ("backend" if t.get("type") == "db" else t.get("type")) in CODE_NODE_TYPES]
+    for node_id in done_ids:
+        result = wt.merge_branch(integ_wt, f"aa/{stamp}/{node_id}")
+        if not result.ok:
+            write_text(run_dir / "integration_report.md",
+                       "# 통합 병합 충돌(수동 병합 필요)\n\n"
+                       f"- 충돌 브랜치: aa/{stamp}/{node_id}\n"
+                       f"- 충돌 파일: {result.conflicts}\n"
+                       f"- 이미 병합된 노드: {merged}\n\n"
+                       "worktree/레인 브랜치를 보존합니다. 수동 병합 후 다시 진행하세요.\n")
+            return False, integration_branch
+        merged.append(node_id)
+
+    write_text(run_dir / "integration_report.md",
+               f"# 통합 성공\n\n- 통합 브랜치: {integration_branch}\n- 병합 노드: {merged}\n")
+    return True, integration_branch
+
+
+def _cleanup_lanes(config: Config, run_dir: Path, tasks: list[dict[str, Any]], stamp: str) -> None:
+    # 성공 정리: 레인 worktree 제거 + 레인 브랜치 삭제. 통합 브랜치는 남긴다(사람 리뷰 대상).
+    # worktree 헬퍼는 함수 내부에서 지연 import한다(모듈 로드 순서/순환 회피).
+    from autoagent import worktree as wt
+
+    for t in tasks:
+        if ("backend" if t.get("type") == "db" else t.get("type")) not in CODE_NODE_TYPES:
+            continue
+        node_id = t.get("id")
+        wt.remove_worktree(config.workspace, run_dir / "worktrees" / str(node_id))
+        wt.delete_branch(config.workspace, f"aa/{stamp}/{node_id}")
+    wt.remove_worktree(config.workspace, run_dir / "worktrees" / "_integration")
+
+
 def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> int:
     """승인된 task_graph를 wavefront 병렬로 실행한다(재개 진입점)."""
     # worktree 헬퍼는 함수 내부에서 지연 import한다(모듈 로드 순서/순환 회피).
@@ -223,5 +317,25 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
         if failed:
             break  # 실제 실패면 안전편향 정지: 다음 파도 시작 안 함(barrier에서 멈춤).
 
-    # 7c/7d에서 failed/budget_stopped 시 통합 생략 + 통합 병합·평가/리포트를 채운다.
+    _write_skipped_report(run_dir, tasks)
+
+    if args.dry_run:
+        write_text(run_dir / "final_report.md", "# Task Graph dry-run 완료\n\n노드 프롬프트만 렌더했습니다.\n")
+        print(f"Task graph dry-run complete: {run_dir}")
+        return 0
+
+    if failed:
+        _mark_blocked_descendants(run_dir, task_graph)
+
+    integrated, integration_branch = _integrate_and_cleanup(
+        args, config, run_dir, tasks, stamp, baseline, failed, budget_stopped,
+    )
+    if not integrated:
+        write_text(run_dir / "final_report.md",
+                   "# Task Graph 실행 정지\n\n통합하지 못했습니다. integration_report.md를 보세요.\n"
+                   f"worktree/브랜치를 보존합니다: {run_dir / 'worktrees'}\n")
+        print(f"Task graph run stopped without integration: {run_dir}")
+        return 0
+
+    # 7d에서 통합 평가/리포트를 채운 뒤 정리한다.
     return 0
