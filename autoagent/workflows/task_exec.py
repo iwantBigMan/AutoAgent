@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import subprocess
+import threading
 import time
 from argparse import Namespace
 from concurrent.futures import ThreadPoolExecutor
@@ -20,21 +21,34 @@ from typing import Any
 from autoagent.artifacts import read_text, write_json, write_text
 from autoagent.config import Config
 from autoagent.routing import route_task
-from autoagent.runner import AgentCallBudget, AgentCallBudgetStopped, require_command, run_process, write_command_artifact
+from autoagent.runner import AgentCallBudget, AgentCallBudgetStopped
 from autoagent.safety import git_baseline_status
 from autoagent.workflows.routed_common import block_implementation, run_evaluation, run_final_report
-from autoagent.workflows.routed_impl import command_for_agent, run_impl_review_fix
+from autoagent.workflows.routed_impl import run_impl_review_fix
 
 
 # 프롬프트 파일(PROMPT_ALIASES)에 존재하는, 레인으로 구현 가능한 타입.
 CODE_NODE_TYPES = {"backend", "frontend"}
+
+# git worktree add·레인 커밋을 직렬화하는 프로세스 전역 락. 같은 파도의 병렬 레인이
+# 동시에 worktree를 추가하면 .git/worktrees 인덱스 lock 레이스로 무고한 노드가
+# 실패한다(crit 3). git 조작은 이 락 안에서만, 에이전트 실행은 락 밖에서 병렬로 둔다.
+_GIT_LOCK = threading.Lock()
+
+
+class CyclicGraphError(Exception):
+    """task_graph에 순환 의존이 있어 위상정렬이 불가능함을 알린다.
+
+    topological_waves는 SystemExit 대신 이 예외를 던져, 렌더 경로(decompose 브리핑)가
+    게이트 산출물을 남긴 뒤 우아하게 처리하거나 실행기가 halt로 승격할 수 있게 한다(imp 6).
+    """
 
 
 def topological_waves(tasks: list[dict[str, Any]]) -> list[list[str]]:
     """의존성 기반 파도 리스트를 만든다. 이미 done인 노드는 만족된 것으로 보고 배제한다.
 
     한 파도 = 아직 미완이며 모든 의존성이 done이거나 이전 파도에서 처리된 노드들.
-    파도 내부 순서는 입력 tasks 순서를 보존해 결정론적이다. 순환 의존이면 SystemExit.
+    파도 내부 순서는 입력 tasks 순서를 보존해 결정론적이다. 순환 의존이면 CyclicGraphError.
     """
     by_id = {t.get("id"): t for t in tasks}
     done: set[str] = {t.get("id") for t in tasks if t.get("status") == "done"}
@@ -47,7 +61,7 @@ def topological_waves(tasks: list[dict[str, Any]]) -> list[list[str]]:
             if all(dep in satisfied for dep in (by_id[nid].get("dependencies") or []))
         ]
         if not wave:
-            raise SystemExit(f"task_graph에 순환 의존이 있습니다(진행 불가): {remaining}")
+            raise CyclicGraphError(f"task_graph에 순환 의존이 있습니다(진행 불가): {remaining}")
         waves.append(wave)
         satisfied |= set(wave)
         remaining = [nid for nid in remaining if nid not in satisfied]
@@ -74,6 +88,30 @@ def set_status(run_dir: Path, task_graph: dict[str, Any], node_id: str, status: 
             t["status"] = status
             break
     persist_status(run_dir, task_graph)
+
+
+def load_exec_state(run_dir: Path, config: Config) -> dict[str, Any]:
+    """실행 stamp·baseline_sha를 재개 사이에 재사용하도록 exec_state.json에 영속한다(crit 2 + minor 9).
+
+    최초 진입: stamp=timestamp, baseline_sha=git rev-parse HEAD(실제 SHA)를 확정해 저장한다.
+    재개 진입: 기존 exec_state.json을 그대로 읽어 done 노드가 동일 aa/<stamp>/<id> ref로
+    병합되고, 모든 레인이 동일 baseline SHA에서 분기하게 한다(리터럴 "HEAD" 금지).
+    """
+    path = run_dir / "exec_state.json"
+    if path.exists():
+        return json.loads(read_text(path))
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    # baseline은 실제 SHA로 고정한다. 재개 사이 타깃 HEAD가 이동해도 레인이 최초 baseline에서 분기.
+    baseline_sha = "HEAD"
+    proc = subprocess.run(
+        ["git", "-C", str(config.workspace), "rev-parse", "HEAD"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        baseline_sha = proc.stdout.strip()
+    state = {"stamp": stamp, "baseline_sha": baseline_sha}
+    write_json(path, state)
+    return state
 
 
 def _node_route(node: dict[str, Any]) -> dict[str, Any]:
@@ -133,7 +171,18 @@ def run_node(
 
     if not args.dry_run:
         branch = f"aa/{stamp}/{node_id}"
-        wt.add_worktree(config.workspace, worktree_path, branch, baseline)
+        # git worktree add는 .git 인덱스를 잠그므로 병렬 레인 간 직렬화한다(crit 3).
+        with _GIT_LOCK:
+            # 멱등 재-add(crit 4): pending 노드 재개 시 이전 partial worktree/브랜치를
+            # 깨끗이 폐기하고 새로 만든다(done 노드는 waves에서 제외돼 재-add 대상 아님).
+            if worktree_path.exists():
+                wt.remove_worktree(config.workspace, worktree_path)
+            # prune으로 stale worktree 등록을 정리(경로가 사라졌어도 등록이 남을 수 있음).
+            subprocess.run(["git", "-C", str(config.workspace), "worktree", "prune"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if wt.branch_exists(config.workspace, branch):
+                wt.delete_branch(config.workspace, branch)
+            wt.add_worktree(config.workspace, worktree_path, branch, baseline)
 
     try:
         implementation, review, fix, resolved, stopped = run_impl_review_fix(
@@ -149,19 +198,39 @@ def run_node(
         return "failed"
 
     if not args.dry_run:
-        # soft scope 가드: allowed_paths 밖/blocked_paths 안 변경을 플래그(차단 아님).
-        violations = wt.scope_violations(
-            config.workspace, worktree_path,
-            node.get("allowed_paths") or [], node.get("blocked_paths") or [],
-        )
-        if violations:
-            write_text(node_out / "scope_violations.md",
-                       "# scope 위반\n\n" + "\n".join(f"- {v}" for v in violations) + "\n")
-        # 레인 브랜치에 커밋(구현 산출을 병합 대상으로 고정). 변경 없으면 commit이 실패하나 무해.
-        subprocess.run(["git", "-C", str(worktree_path), "add", "-A"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
-        subprocess.run(["git", "-C", str(worktree_path), "commit", "-m", f"aa: node {node_id}"],
-                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+        # git add/commit도 인덱스를 잠그므로 직렬화한다(crit 3).
+        with _GIT_LOCK:
+            # 커밋 단계 재배치(imp 5): (a) git add -A → (b) scope 검사(staged) → (c) commit.
+            # 신규(untracked) 파일도 staged된 뒤 검사돼 scope 가드가 무력화되지 않는다.
+            add_proc = subprocess.run(
+                ["git", "-C", str(worktree_path), "add", "-A"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            if add_proc.returncode != 0:
+                write_text(node_out / "commit_failed.md",
+                           f"노드 {node_id} git add 실패:\n{add_proc.stderr.strip() or add_proc.stdout.strip()}\n")
+                return "failed"
+            # soft scope 가드: allowed_paths 밖/blocked_paths 안 변경을 플래그(차단 아님).
+            violations = wt.scope_violations(
+                config.workspace, worktree_path,
+                node.get("allowed_paths") or [], node.get("blocked_paths") or [],
+            )
+            if violations:
+                write_text(node_out / "scope_violations.md",
+                           "# scope 위반\n\n" + "\n".join(f"- {v}" for v in violations) + "\n")
+            # 레인 브랜치에 커밋(구현 산출을 병합 대상으로 고정). returncode를 검사한다(imp 7).
+            commit_proc = subprocess.run(
+                ["git", "-C", str(worktree_path), "commit", "-m", f"aa: node {node_id}"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            if commit_proc.returncode != 0:
+                combined = f"{commit_proc.stdout}\n{commit_proc.stderr}"
+                # 무변경(nothing to commit)은 정상: done 유지.
+                if "nothing to commit" not in combined:
+                    # identity 미설정·인덱스 락 등 실제 실패면 노드를 failed로 표시.
+                    write_text(node_out / "commit_failed.md",
+                               f"노드 {node_id} 커밋 실패:\n{commit_proc.stderr.strip() or commit_proc.stdout.strip()}\n")
+                    return "failed"
     return "done"
 
 
@@ -268,6 +337,21 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
     from autoagent import worktree as wt
 
     try:
+        # checkpoint에서 재개 상태를 복원한다(crit 1: workspace, minor 8: 예산). resume_routed_workflow와 동일 패턴.
+        checkpoint_path = run_dir / "checkpoint.json"
+        if checkpoint_path.exists():
+            checkpoint = json.loads(read_text(checkpoint_path))
+            # args.workspace 미지정 시에만 checkpoint의 workspace를 복원(엉뚱한 레포 실행 방지).
+            if not args.workspace and checkpoint.get("workspace"):
+                config.workspace = Path(checkpoint["workspace"])
+            # 재개 시 예산/라운드 정합화(minor 8): args가 cli 기본값이면 checkpoint 값을 쓴다.
+            if not args.max_agent_calls and checkpoint.get("max_agent_calls"):
+                args.max_agent_calls = int(checkpoint["max_agent_calls"])
+            if args.max_review_rounds is None and checkpoint.get("max_review_rounds") is not None:
+                args.max_review_rounds = int(checkpoint["max_review_rounds"])
+        if not args.dry_run and not config.workspace.exists():
+            raise SystemExit(f"Workspace does not exist: {config.workspace}")
+
         task_graph = load_task_graph(run_dir)
         tasks = task_graph.get("tasks", []) or []
 
@@ -278,7 +362,11 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
             if not ok:
                 return block_implementation(run_dir, git_message)
 
-        waves = topological_waves(tasks)  # 순환이면 여기서 SystemExit
+        try:
+            waves = topological_waves(tasks)
+        except CyclicGraphError as exc:
+            # 순환 그래프는 기존 halt 동작을 유지한다(imp 6).
+            raise SystemExit(str(exc))
         write_text(run_dir / "waves.txt", "\n".join(" ".join(w) for w in waves) + "\n")
 
         overlaps = wt.warn_path_overlap(tasks)
@@ -288,8 +376,15 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
 
         budget = AgentCallBudget(args.max_agent_calls)
 
-        stamp = time.strftime("%Y%m%d_%H%M%S")
-        baseline = "HEAD"
+        # 실행상태 영속(crit 2 + minor 9): stamp·baseline_sha를 재개 사이 재사용한다.
+        # dry-run은 git이 없으므로 stamp만 확정하고 baseline은 리터럴로 둔다(산출물 무영향).
+        if args.dry_run:
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            baseline = "HEAD"
+        else:
+            exec_state = load_exec_state(run_dir, config)
+            stamp = exec_state["stamp"]
+            baseline = exec_state["baseline_sha"]
         by_id = {t.get("id"): t for t in tasks}
         failed = False
         budget_stopped = False
