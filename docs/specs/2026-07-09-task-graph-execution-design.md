@@ -2,7 +2,8 @@
 
 작성일: 2026-07-09
 대상: AutoAgent `decompose` 워크플로우 후속(실행 단계) + `--resume` 확장
-상태: **superseded by `2026-07-12-decompose-parallel-executor-design.md`** (미구현 초안)
+상태: **superseded by `2026-07-12-decompose-parallel-executor-design.md`**
+  (이 순차 초안 자체는 미구현. 후속 병렬 설계가 2026-07-12 구현·병합됨 — PR #12)
   — 후속 설계가 이 순차 실행기를 의존성 wavefront 병렬로 일반화하며
   (`max_parallel_lanes=1`이면 이 순차 설계와 동치), 이 문서의 `approval_brief`·
   task별 `status` 영속·soft scope 가드·`mode` 디스패치 규약을 그대로 흡수한다.

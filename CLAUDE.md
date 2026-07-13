@@ -19,7 +19,13 @@ cross-model implement/review with human approval gates. Full reference: `README.
 - `--workflow simple|routed|decompose`; routed = context→architecture⇄validation→
   approval gate→implement→review⇄fix→eval→report.
 - `autoagent/workflows/routed_*.py` split by phase: `routed_preamble` (plan),
-  `routed_impl` (implement/review loop), `routed_docs` (read-only), `routed_common` (gates).
+  `routed_impl` (implement/review loop), `routed_docs` (read-only), `routed_common` (gates),
+  plus `task_exec.py` (decompose's parallel executor).
+- `autoagent/worktree.py`: git worktree / integration helpers used by the decompose executor.
+- decompose: after the approval gate, `--resume` runs the task_graph as a wavefront
+  parallel execution — each node isolated in its own worktree, reviewed by the opposite
+  model, then merged into an integration branch `aa-integration/<stamp>`; concurrency is
+  `config.max_parallel_lanes` (default 2), sequential if `1`.
 - Run artifacts land in `runs/YYYYMMDD_HHMMSS/` (gitignored except `.gitkeep`).
 
 ## Testing / verification

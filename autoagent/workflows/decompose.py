@@ -30,7 +30,7 @@ def run_decompose_workflow(args: Namespace, config: Config, request: str, run_di
         write_command_artifact(
             run_dir,
             "01_claude_decomposition",
-            claude_command(config.claude_command, config.claude_model, "plan"),
+            claude_command(config.claude_command, config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
         )
         decomposition = dry_run_task_graph(request)
         write_text(run_dir / "01_claude_decomposition.md", decomposition)
@@ -38,7 +38,7 @@ def run_decompose_workflow(args: Namespace, config: Config, request: str, run_di
         claude = require_command(config.claude_command)
         decomposition = run_process(
             name="01_claude_decomposition",
-            command=claude_command(claude, config.claude_model, "plan"),
+            command=claude_command(claude, config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
             prompt=decomposition_prompt,
             cwd=config.workspace,
             out_dir=run_dir,

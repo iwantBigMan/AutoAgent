@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>문서 2 · harness-test 분석 — 동료 하네스</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1e222e; --line:#2b3040;
+    --ink:#e7e9ee; --muted:#9aa3b2; --dim:#6b7488;
+    --ac:#33c2c8; --ac-bg:#0f2e30; --ac-line:#1c5f62;   /* 시안 = harness-test */
+    --accent:#7aa2ff; --danger:#e5687a; --ok:#42c98a;
+    --radius:14px;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+    --sans:-apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  nav{position:sticky;top:0;z-index:50;background:rgba(15,17,23,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{max-width:1060px;margin:0 auto;padding:12px 22px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  nav .brand{font-weight:800;margin-right:auto;font-size:15px}
+  nav .brand b{color:var(--ac)}
+  nav a.tab{color:var(--muted);font-size:13px;padding:6px 10px;border-radius:9px}
+  nav a.tab:hover{color:var(--ink);background:var(--panel2)}
+  main{max-width:1060px;margin:0 auto;padding:0 22px 100px}
+  section{padding:54px 0 8px;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  h1{font-size:clamp(28px,4.6vw,44px);line-height:1.14;margin:0 0 16px;letter-spacing:-.5px}
+  h2{font-size:25px;margin:0 0 6px;letter-spacing:-.3px}
+  h2 .n{color:var(--dim);font-variant-numeric:tabular-nums;margin-right:10px;font-weight:700}
+  .lead{color:var(--muted);font-size:16.5px;max-width:74ch}
+  h3{font-size:16px;margin:26px 0 10px}
+  p{margin:12px 0} code{font-family:var(--mono);font-size:.88em;background:var(--panel2);padding:1px 6px;border-radius:6px;color:#cfd6e6}
+  .muted{color:var(--muted)} .ac{color:var(--ac)}
+  .hero{padding:76px 0 38px;border-top:none}
+  .eyebrow{display:inline-block;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--ac);border:1px solid var(--ac-line);padding:5px 12px;border-radius:999px;margin-bottom:20px}
+  .thesis{font-size:19px;max-width:76ch;margin:18px 0}
+  .thesis b{color:#fff;background:linear-gradient(transparent 62%,rgba(51,194,200,.26) 0);padding:0 2px}
+  .grid{display:grid;gap:14px;margin-top:20px}
+  .g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .card h4{margin:0 0 6px;font-size:15px} .card p{margin:6px 0 0;font-size:13.5px;color:var(--muted)}
+  pre{background:#0b0d13;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;color:#c7cede;margin:16px 0}
+  pre .cm{color:var(--dim)} pre b{color:#fff} pre .a{color:var(--ac)}
+  .tbl{overflow-x:auto;margin:18px 0}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:560px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:700;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase}
+  tbody tr:hover{background:var(--panel)} td b{color:#fff}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;white-space:nowrap;color:var(--ac);background:var(--ac-bg);border:1px solid var(--ac-line)}
+  .callout{border-left:3px solid var(--ac);background:#0d1e1f;border-radius:0 12px 12px 0;padding:13px 17px;margin:16px 0;font-size:13.5px}
+  .callout b{color:#8fe3e7}
+  .quote{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 12px 12px 0;padding:12px 17px;margin:14px 0;font-size:14.5px;color:#dfe4ee;font-style:italic}
+  .layer{display:flex;flex-direction:column;gap:8px;margin:18px 0}
+  .layer .lr{display:flex;gap:12px;align-items:flex-start;padding:11px 14px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  .layer .lname{font-weight:800;min-width:92px;color:var(--ac)}
+  .layer .ldesc{font-size:13px;color:var(--muted)}
+  footer{max-width:1060px;margin:0 auto;padding:28px 22px 60px;color:var(--dim);font-size:13px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <div class="brand"><b>문서 2</b> · harness-test</div>
+  <a class="tab" href="#top">개요</a><a class="tab" href="#layers">4층</a><a class="tab" href="#axis">4+1축</a>
+  <a class="tab" href="#cat">카탈로그</a><a class="tab" href="#sg">강점·빈틈</a>
+</div></nav>
+
+<main>
+  <section class="hero" id="top">
+    <span class="eyebrow">동료 하네스 · policy-enforced thick harness</span>
+    <h1>가드레일을 먼저 깔고<br>그 안에서 자율 팬아웃</h1>
+    <p class="thesis"><b>정책(policy.json v3) + 훅 강제 + 자율 JS 워크플로우 + 커맨드</b>의 4층 하네스.
+    에이전트가 <b>실수하지 못하도록</b> 읽기도메인·쓰기범위를 정책으로 격자화하고, 모든 파일 접근을 사전 검사,
+    종료 시점에 테스트를 하드게이트한다. "한 작업 = 한 브랜치". 덱 기준 <b>두꺼운</b> 하네스, 앱 레포 안에 동거.</p>
+    <div class="grid g3">
+      <div class="card"><h4 class="ac">에이전트 15</h4><p>architect·planner(opus) / backend·frontend·evaluators(sonnet) / doc-updater(haiku) / 리서치 7종</p></div>
+      <div class="card"><h4 class="ac">커맨드 8 + 워크플로우 8</h4><p>/design /feature /verify /review-flow /deploy /bugfix /research-*</p></div>
+      <div class="card"><h4 class="ac">훅 6</h4><p>guard-paths · format-on-edit · on-stop(테스트게이트) · worklog · activity-ledger · sync-frontmatter</p></div>
+    </div>
+  </section>
+
+  <section id="layers">
+    <h2><span class="n">01</span>4층 구조</h2>
+    <div class="layer">
+      <div class="lr"><div class="lname">정책</div><div class="ldesc"><code>policy.json</code> (v3) — 진실원본: 에이전트·읽기도메인·쓰기범위·테스트·lint·worklog를 한 곳에서</div></div>
+      <div class="lr"><div class="lname">훅</div><div class="ldesc"><code>hooks/*.py</code> — PreToolUse 경로/시크릿 차단 → PostToolUse lint → <b>Stop 테스트게이트</b> → worklog 자동기록</div></div>
+      <div class="lr"><div class="lname">워크플로우</div><div class="ldesc"><code>workflows/*.js</code> — <code>agent()/parallel()/phase()</code> 결정론 팬아웃 (재현·비용추적)</div></div>
+      <div class="lr"><div class="lname">커맨드</div><div class="ldesc"><code>commands/*.md</code> — 사용자 선택·확정·PR. 재현불가 입력(날짜·선택)을 args로 주입해 결정론 보장</div></div>
+    </div>
+    <div class="callout"><b>무한루프 방지 다중장치:</b> MAX_ROUNDS(3, bugfix 2) + 무진전 감지(failure signature 동일 시 중단) + 토큰 예산 가드(&lt;60k) + 교차단계 회귀 시 사람 개입.</div>
+  </section>
+
+  <section id="axis">
+    <h2><span class="n">02</span>프레임워크 4+1축 매핑</h2>
+    <div class="grid g2">
+      <div class="card"><h4 class="ac">Context</h4><p>CLAUDE.md + 에이전트 헤더 + <code>docs/CODEMAPS</code>(현황 진실원본) + ADR. progress 대신 <code>.active-work.json</code>(진행원장) + <code>worklog/</code>(Stop 자동기록) → 덱의 <b>Ralph/Handoff</b>를 거의 그대로 구현.</p></div>
+      <div class="card"><h4 class="ac">Tool</h4><p>MCP 4종(sequential-thinking·arxiv·exa·github, 대개 로컬 off) + 스킬 7종(api-design·solid-principles 등, 에이전트 시작 전 체크리스트 주입).</p></div>
+      <div class="card" style="border-color:var(--ac-line)"><h4 class="ac">Permission ★강점</h4><p><code>policy.json</code> 격자형 읽기(readBoundaries)/쓰기(write·deny) 경계 + <code>guard-paths.py</code>가 모든 Read/Write/Bash 사전검사 + 시크릿(.env·*.pem·*.key·.git) 전역차단. <b>단, 사람 승인 루프는 사실상 없음</b>.</p></div>
+      <div class="card" style="border-color:var(--ac-line)"><h4 class="ac">Verification ★강점</h4><p><b>3중 결정론 게이트</b>: 유닛(pytest/npm, Stop 하드차단·자동수정 3회) + 계약(schemathesis↔openapi) + 화면(Playwright+census). <b>LLM 평가자 배제, exit code만 신뢰.</b> e2e는 CI에서.</p></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h4 class="ac">Orchestration</h4><p>15에이전트·8워크플로우 결정론 팬아웃. "한 작업=한 브랜치"(<code>ensure-branch.sh</code> 멱등), 큰 작업은 planner가 세로 슬라이스 + roadmap 체크박스(수평 분할 방지). 리서치 층은 다중출처 + 적대반증 3렌즈 + confidence 등급.</p></div>
+  </section>
+
+  <section id="cat">
+    <h2><span class="n">03</span>에이전트 · 커맨드 카탈로그</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>커맨드</th><th>워크플로우</th><th>동작</th></tr></thead>
+      <tbody>
+        <tr><td><code>/design</code></td><td>design.js</td><td>architect 분석 → planner 계획 → 사용자 확정</td></tr>
+        <tr><td><code>/feature</code></td><td>feature.js</td><td>작업브랜치 → backend/frontend 구현 → doc-updater → 서버기동</td></tr>
+        <tr><td><code>/verify</code></td><td>verify-fix.js</td><td>evaluator 먼저 → 실패영역만 executor 수정 → 재검</td></tr>
+        <tr><td><code>/review-flow</code></td><td>review-flow.js</td><td>diff 감지 → 영역별 병렬 리뷰 → findings 종합 → PR</td></tr>
+        <tr><td><code>/deploy</code></td><td>deploy.js</td><td>Dockerfile/compose 작성 → 로컬 도커 up</td></tr>
+        <tr><td><code>/bugfix</code></td><td>bugfix.js</td><td>로그 입력 → 분류(단순 vs 구조) → 수정 → 검증</td></tr>
+        <tr><td><code>/research-deep-dive</code></td><td>research-deep-dive.js</td><td>coordinator → 4리서처 → 적대반증 → synthesizer → HTML</td></tr>
+      </tbody>
+    </table></div>
+    <div class="tbl"><table>
+      <thead><tr><th>에이전트(15)</th><th>모델</th><th>역할</th></tr></thead>
+      <tbody>
+        <tr><td>architect</td><td><span class="badge">opus</span></td><td>구조분석·ADR</td></tr>
+        <tr><td>planner</td><td><span class="badge">opus</span></td><td>실행계획·분할 판정</td></tr>
+        <tr><td>backend / frontend</td><td><span class="badge">sonnet</span></td><td>FastAPI / React 구현</td></tr>
+        <tr><td>backend-evaluator / frontend-evaluator</td><td><span class="badge">sonnet</span></td><td>schemathesis 계약 / Playwright 화면</td></tr>
+        <tr><td>devops-engineer</td><td><span class="badge">sonnet</span></td><td>Docker/배포</td></tr>
+        <tr><td>doc-updater</td><td><span class="badge">haiku</span></td><td>코드맵 자동 갱신</td></tr>
+        <tr><td>research ×7</td><td><span class="badge">opus/sonnet</span></td><td>coordinator·academic·search·technical·synthesizer·critic·architect</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">앱 스택: FastAPI async + asyncpg / React18+TS+Tailwind+Vite / PostgreSQL+Alembic / schemathesis+Playwright / Docker Compose. (JWT 인증 + 주식목록)</p>
+  </section>
+
+  <section id="sg">
+    <h2><span class="n">04</span>강점 &amp; 빈틈</h2>
+    <div class="grid g2">
+      <div class="card"><h4 style="color:var(--ok)">강점</h4><p>① 정책 일원화(policy.json 단일원본) ② 격자형 경계 + 시크릿 차단 ③ 3중 결정론 검증(LLM 평가자 배제) ④ 무한루프 방지 다중장치 ⑤ 작업추적(active-work·worklog·ADR·codemap) ⑥ 리서치 다중검증(적대반증 3렌즈) ⑦ 자율 워크플로우 ↔ 상호작용 커맨드 분리</p></div>
+      <div class="card"><h4 style="color:var(--danger)">빈틈</h4><p>① <b>크로스모델 없음</b>(모델 정적 하드코드) ② <b>사람 승인 게이트 없음</b>(도구·MCP 자동) ③ MCP 등록 시 전역접근 ④ 비용은 사후 worklog 집계(실시간 예산 아님) ⑤ 코드맵 수동유지(대규모 싱크 리스크)</p></div>
+    </div>
+    <div class="quote">본질 — "정책 → 훅 → 자율 워크플로우 → 커맨드"로 에이전트가 실수하지 못하게 <b>가드레일을 먼저 깔고</b> 자율 팬아웃. 적합: 중규모 팀 내 협업, 정책 준수 필수 조직.</div>
+  </section>
+</main>
+
+<footer>
+  문서 2 · harness-test 분석 (동료 하네스) · 2026-07-12 · 짝 문서 <code>docs/2_동료하네스_harness-test.md</code><br>
+  근거: <code>.claude/policy.json</code>·<code>agents/*.md</code>·<code>commands/*.md</code>·<code>hooks/*.py</code>·<code>workflows/*.js</code>·<code>CLAUDE.md</code>·<code>.mcp.json</code> · 시리즈: ① 프레임워크 · ③ AutoAgent
+</footer>
+<script>
+  var tabs=[].slice.call(document.querySelectorAll('nav a.tab')), secs=tabs.map(function(t){return document.querySelector(t.getAttribute('href'))});
+  function s(){var y=window.scrollY+130,a=-1;for(var i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop<=y)a=i;}tabs.forEach(function(t,i){t.style.color=i===a?'var(--ink)':'';t.style.background=i===a?'var(--panel2)':'';});}
+  window.addEventListener('scroll',s,{passive:true});s();
+</script>
+</body>
+</html>

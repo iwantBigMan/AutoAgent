@@ -64,6 +64,8 @@ def claude_command(
     permission_mode: str | None = None,
     effort: str | None = None,
     skip_permissions: bool = False,
+    allowed_tools: list[str] | None = None,
+    mcp_config_path: str | None = None,
 ) -> list[str]:
     """headless `claude -p ...` 명령 리스트를 조립한다(model/permission-mode/effort 선택).
 
@@ -80,9 +82,18 @@ def claude_command(
         command.extend(["--permission-mode", permission_mode])
     if skip_permissions:
         command.append("--dangerously-skip-permissions")
+    if mcp_config_path:
+        # 하네스가 생성한 MCP 서버 config 파일을 지정하고 다른 소스는 무시한다(--strict-mcp-config).
+        # 타깃 레포의 .mcp.json 대신 하네스가 서버를 소유해 --project 다중 타깃에서 일관.
+        command.extend(["--mcp-config", mcp_config_path, "--strict-mcp-config"])
     if effort:
         # 유효값: low/medium/high/xhigh/max. 그 외는 claude가 경고 후 기본값으로 무시.
         command.extend(["--effort", effort])
+    if allowed_tools:
+        # MCP 툴 allowlist. 헤드리스 plan 모드는 승인 TTY가 없어 allowlist 없이는 MCP 툴
+        # 호출이 거부된다(2026-07-13 실측, docs/specs/2026-07-13-mcp-integration-design.md §6.3).
+        # 공백 구분 단일 인자로 넘긴다. 비어 있으면 이 블록을 건너뛰어 기존 명령과 바이트 동일.
+        command.extend(["--allowedTools", " ".join(allowed_tools)])
     command.extend(["--input-format", "text"])
     return command
 
