@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>문서 3 · AutoAgent 분석 — 우리 하네스</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1e222e; --line:#2b3040;
+    --ink:#e7e9ee; --muted:#9aa3b2; --dim:#6b7488;
+    --ac:#a988ff; --ac-bg:#231a3a; --ac-line:#4a3878;   /* 바이올렛 = AutoAgent */
+    --claude:#e08653; --codex:#2bb98a; --human:#c9a227;
+    --accent:#7aa2ff; --danger:#e5687a; --ok:#42c98a;
+    --radius:14px;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+    --sans:-apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  nav{position:sticky;top:0;z-index:50;background:rgba(15,17,23,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{max-width:1060px;margin:0 auto;padding:12px 22px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  nav .brand{font-weight:800;margin-right:auto;font-size:15px}
+  nav .brand b{color:var(--ac)}
+  nav a.tab{color:var(--muted);font-size:13px;padding:6px 10px;border-radius:9px}
+  nav a.tab:hover{color:var(--ink);background:var(--panel2)}
+  main{max-width:1060px;margin:0 auto;padding:0 22px 100px}
+  section{padding:54px 0 8px;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  h1{font-size:clamp(28px,4.6vw,44px);line-height:1.14;margin:0 0 16px;letter-spacing:-.5px}
+  h2{font-size:25px;margin:0 0 6px;letter-spacing:-.3px}
+  h2 .n{color:var(--dim);font-variant-numeric:tabular-nums;margin-right:10px;font-weight:700}
+  .lead{color:var(--muted);font-size:16.5px;max-width:74ch}
+  h3{font-size:16px;margin:26px 0 10px}
+  p{margin:12px 0} code{font-family:var(--mono);font-size:.88em;background:var(--panel2);padding:1px 6px;border-radius:6px;color:#cfd6e6}
+  .muted{color:var(--muted)} .ac{color:var(--ac)}
+  .hero{padding:76px 0 38px;border-top:none}
+  .eyebrow{display:inline-block;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--ac);border:1px solid var(--ac-line);padding:5px 12px;border-radius:999px;margin-bottom:20px}
+  .thesis{font-size:19px;max-width:76ch;margin:18px 0}
+  .thesis b{color:#fff;background:linear-gradient(transparent 62%,rgba(169,136,255,.28) 0);padding:0 2px}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}
+  .pill{display:inline-flex;align-items:center;gap:8px;font-size:13px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel)}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .dot.c{background:var(--claude)} .dot.x{background:var(--codex)} .dot.h{background:var(--human)}
+  .grid{display:grid;gap:14px;margin-top:20px}
+  .g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .card h4{margin:0 0 6px;font-size:15px;display:flex;gap:8px;align-items:center} .card p{margin:6px 0 0;font-size:13.5px;color:var(--muted)}
+  .card .idx{font-family:var(--mono);color:var(--ac);font-size:13px}
+  pre{background:#0b0d13;border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;color:#c7cede;margin:16px 0}
+  pre .cm{color:var(--dim)} pre b{color:#fff} pre .c{color:var(--claude)} pre .x{color:var(--codex)} pre .h{color:var(--human)} pre .a{color:var(--ac)}
+  .tbl{overflow-x:auto;margin:18px 0}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:560px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:700;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase}
+  tbody tr:hover{background:var(--panel)} td b{color:#fff}
+  .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;white-space:nowrap}
+  .b-c{color:var(--claude);background:#3a2318;border:1px solid #7a4a2c}
+  .b-x{color:var(--codex);background:#123028;border:1px solid #1f6b52}
+  .b-r{color:var(--ac);background:var(--ac-bg);border:1px solid var(--ac-line)}
+  .stars{letter-spacing:2px;color:var(--ac)}
+  .callout{border-left:3px solid var(--ac);background:#181226;border-radius:0 12px 12px 0;padding:13px 17px;margin:16px 0;font-size:13.5px}
+  .callout b{color:#c9b3ff}
+  .quote{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 12px 12px 0;padding:12px 17px;margin:14px 0;font-size:14.5px;color:#dfe4ee;font-style:italic}
+  footer{max-width:1060px;margin:0 auto;padding:28px 22px 60px;color:var(--dim);font-size:13px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <div class="brand"><b>문서 3</b> · AutoAgent</div>
+  <a class="tab" href="#top">베팅</a><a class="tab" href="#exec">실행모델</a><a class="tab" href="#flow">파이프라인</a>
+  <a class="tab" href="#roles">역할</a><a class="tab" href="#risk">라우팅·위험</a><a class="tab" href="#axis">4축 자기평가</a>
+  <a class="tab" href="#sg">강점·빈틈</a>
+</div></nav>
+
+<main>
+  <section class="hero" id="top">
+    <span class="eyebrow">우리 하네스 · cross-model orchestrator</span>
+    <h1>두 모델이 교대로 구현하고<br>서로를 리뷰한다</h1>
+    <p class="thesis"><b>AutoAgent는 Claude Code CLI와 Codex CLI를 서브프로세스로 구동해, 별도의 타깃
+    워크스페이스</b>를 두 모델이 교대로 구현·리뷰하게 조율한다. 비결정적 에이전트를 <b>결정적 Python 제어
+    흐름</b>으로 감싸고, 위험한 변경은 <b>사람이 승인 게이트</b>를 통과시켜야 코드가 바뀐다. 덱 두께 스펙트럼상 <b>중간</b>, 타깃 밖 외부·비침투.</p>
+    <div class="legend">
+      <span class="pill"><i class="dot c"></i> Claude (기획·구현·리뷰·보고)</span>
+      <span class="pill"><i class="dot x"></i> Codex (검증·리뷰·평가·구현)</span>
+      <span class="pill"><i class="dot h"></i> 사람 (승인 게이트)</span>
+    </div>
+  </section>
+
+  <section id="bets" style="border-top:none;padding-top:12px">
+    <h2><span class="n">01</span>5개의 설계 베팅</h2>
+    <div class="grid g2">
+      <div class="card"><h4><span class="idx">01</span> 크로스-모델 리뷰</h4><p>리뷰어는 <b>항상 구현자의 반대 모델</b>. 같은 모델의 자기검토는 같은 맹점 공유 → 적대적 다양성.</p></div>
+      <div class="card"><h4><span class="idx">02</span> 코드가 조율, 프롬프트가 "무엇"</h4><p>행동은 <code>prompts/**/*.md</code>, 오케스트레이션만 Python. Codex가 Claude 스킬을 못 읽어 stdin 중립채널에 행동을 둔다.</p></div>
+      <div class="card"><h4><span class="idx">03</span> 사람 승인 게이트</h4><p>high-risk/db는 코드 변경 <b>전</b> 정지, <code>--resume</code>으로만 진행. "재개 실행 = 승인 행위".</p></div>
+      <div class="card"><h4><span class="idx">04</span> 외부·비침투</h4><p>타깃 안 건드림, 상태는 하네스 레포에만, <b>자동 커밋 없음</b>. 여러 프로젝트에 재사용.</p></div>
+      <div class="card"><h4><span class="idx">05</span> 결정적 제어 흐름</h4><p>루프·분기·예산·게이트 전부 Python. 재현·감사 가능, "얼마나 도느냐"를 <code>--max-agent-calls</code>로 통제.</p></div>
+    </div>
+  </section>
+
+  <section id="exec">
+    <h2><span class="n">02</span>실행 모델</h2>
+    <p class="lead">서브프로세스는 <b>타깃 프로젝트</b>를 cwd로 실행된다. 이 하네스 레포는 편집 대상이 아니라 조율자다.</p>
+<pre><span class="cm"># run.py --workspace C:\...\TargetProject --request "..."</span>
+run.py
+  └─ 서브프로세스로 <span class="c">claude.cmd</span> / <span class="x">codex.cmd</span> 호출
+       ├─ cwd    = config.workspace   <span class="cm">← 타깃 프로젝트 (하네스 레포 아님!)</span>
+       ├─ stdin  = render_template(prompt.md, values)  <span class="cm">← "무엇을 할지"</span>
+       └─ stdout = runs/&lt;stamp&gt;/NN_*.md 로 캡처         <span class="cm">← 산출물</span></pre>
+  </section>
+
+  <section id="flow">
+    <h2><span class="n">03</span>routed 파이프라인 (주력)</h2>
+    <p class="lead">색이 담당 모델 — <span style="color:var(--claude)">Claude</span> / <span style="color:var(--codex)">Codex</span> / <span style="color:var(--human)">사람</span>. 리뷰어는 항상 구현자의 반대 모델.</p>
+<pre>route_task ──► route.json
+  │
+  ▼ <b>[preamble / 계획]</b>
+  <span class="c">context(claude)</span> ──► <span class="c">architecture(claude)</span> ⇄ <span class="x">validation(codex)</span>   <span class="cm">← 검증 루프</span>
+  │
+  ▼ 읽기전용 or docs/review? ── yes ──► docs 라우트(평가+보고, 코드변경 없음)
+  │ no
+  ▼ <span class="h">[승인 게이트]</span> approval_required? ── yes ──► checkpoint + 정지, <span class="h">--resume 대기</span>
+  │ no
+  ▼ git 베이스라인 확인 ── 유효 HEAD 없으면 구현 차단
+  │
+  ▼ <b>[구현 라우트]</b>
+  <span class="c">impl(04)</span> ──► <span class="x">review(05)</span> ⇄ <span class="c">fix(06)</span> ──► <span class="x">final-review(07)</span> ──► <span class="x">eval(08)</span> ──► <span class="c">report(09)</span></pre>
+    <div class="grid g3">
+      <div class="card"><h4>simple</h4><p><span class="badge b-c">plan</span> → <span class="badge b-x">execute</span> → <span class="badge b-c">review</span> 최소 루프</p></div>
+      <div class="card"><h4>routed</h4><p>역할 기반 파이프라인(위). 주력.</p></div>
+      <div class="card"><h4>decompose</h4><p>대규모 요청 → task_graph.json. <b>구현 절대 안 함.</b></p></div>
+    </div>
+  </section>
+
+  <section id="roles">
+    <h2><span class="n">04</span>선언형 역할 레지스트리</h2>
+    <p class="lead"><code>roles.default.json</code>이 9역할을 데이터로 선언, <code>resolve_role</code>이 route/모델 정책으로 해석. 시작 시 <code>validate_roles</code> 검사.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>역할</th><th>agent</th><th>티어</th><th>high-risk 조건</th><th>변경</th><th>권한/샌드박스</th></tr></thead>
+      <tbody>
+        <tr><td>context</td><td><span class="badge b-c">claude</span></td><td>standard</td><td>none</td><td>✗</td><td>plan</td></tr>
+        <tr><td>architect</td><td><span class="badge b-c">claude</span></td><td>tiered</td><td>any_high_risk</td><td>✗</td><td>plan</td></tr>
+        <tr><td>validation</td><td><span class="badge b-x">codex</span></td><td>standard</td><td>none</td><td>✗</td><td>from_read_only</td></tr>
+        <tr><td>implementer</td><td><span class="badge b-r">route</span></td><td>tiered</td><td>backend_high_risk_mutating</td><td>✓</td><td>write</td></tr>
+        <tr><td>reviewer</td><td><span class="badge b-r">route</span></td><td>standard</td><td>none</td><td>✗</td><td>plan</td></tr>
+        <tr><td>fix</td><td><span class="badge b-r">route</span></td><td>tiered</td><td>backend_high_risk_mutating</td><td>✓</td><td>write</td></tr>
+        <tr><td>final-review</td><td><span class="badge b-x">codex</span></td><td>standard</td><td>none</td><td>✗</td><td>configured</td></tr>
+        <tr><td>evaluation</td><td><span class="badge b-x">codex</span></td><td>standard</td><td>none</td><td>✗</td><td>from_read_only</td></tr>
+        <tr><td>report</td><td><span class="badge b-c">claude</span></td><td>standard</td><td>none</td><td>✗</td><td>plan</td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted"><code>tiered</code> + high-risk 충족 → 모델 <b>opus</b>, effort <b>xhigh</b> 승격. claude mutating 권한: 기본 <code>acceptEdits</code>(편집만 자동, bash·네트워크 차단), opt-in <code>bypassPermissions</code>(무샌드박스).</p>
+  </section>
+
+  <section id="risk">
+    <h2><span class="n">05</span>라우팅 &amp; 위험도</h2>
+    <div class="grid g2">
+      <div class="card"><h4 class="ac">라우팅</h4><p><code>--task-type</code> 명시 시 키워드 분류 우회. auto면 명사 점수 → 최고점. <b>구현 의도 가드</b>: 구현 동사가 있으면 docs 오분류를 backend/frontend로 교정.</p></div>
+      <div class="card"><h4 class="ac">위험도 두 층</h4><p>①라우팅 <code>risk_level</code>(db_score→subtype=db/high, HIGH_RISK_TERMS→high) ②승인 게이트 <code>is_high_risk</code>(risk_level=="high" or subtype=="db" or HIGH_RISK_REQUEST_TERMS). frontend는 항상 medium.</p></div>
+    </div>
+    <div class="callout"><b>알려진 잔여(토론거리):</b> 두 고위험 리스트 중복 · frontend 게이트 공백 · 키워드 substring 취약(자기 코드 심볼이 오발 유발 — 라우팅·DB 게이트 모두 교정됨).</div>
+  </section>
+
+  <section id="axis">
+    <h2><span class="n">06</span>프레임워크 4축 자기평가</h2>
+    <div class="tbl"><table>
+      <thead><tr><th>축</th><th>AutoAgent의 상태</th><th>평</th></tr></thead>
+      <tbody>
+        <tr><td><b>Context</b></td><td>run 산출물 + checkpoint(핸드오프는 resume 한정). 상시 상태 외부화(worklog류) 약함</td><td><span class="stars">★★</span></td></tr>
+        <tr><td><b>Tool</b></td><td>MCP 거의 없음. 행동을 프롬프트 중립채널로(Codex가 Claude 스킬 못 읽음)</td><td><span class="stars">★</span></td></tr>
+        <tr><td><b>Permission</b></td><td><b>사람 승인 게이트(high-risk/db)</b> + 권한모드 + codex 샌드박스 + git 베이스라인. 경로 격자가드 없음</td><td><span class="stars">★★</span></td></tr>
+        <tr><td><b>Verification</b></td><td>테스트 없음 → dry-run 바이트 패리티 + <b>크로스모델 상호 리뷰</b>. 실행 테스트 게이트 없음</td><td><span class="stars">★</span></td></tr>
+        <tr><td><b>Orchestration</b></td><td>9역할 고정 파이프라인 + 예산 + stop-after. decompose 제한적 병렬 실행기(worktree, 라이브 미검증)</td><td><span class="stars">★★</span></td></tr>
+      </tbody>
+    </table></div>
+    <p class="muted">덱 패턴 대응: Plan→Execute ✅ · Generate↔Review(크로스모델) ✅ · Router ✅ · <b>Human Approval ✅</b> · Parallel 제한적(미검증) · Verification Loop(실테스트 없음) ⚠️.</p>
+  </section>
+
+  <section id="sg">
+    <h2><span class="n">07</span>안전·검증 &amp; 강점·빈틈</h2>
+    <div class="grid g2">
+      <div class="card"><h4>안전 &amp; 검증</h4><p>--read-only · 유효 Git 베이스라인 없으면 구현 차단 · decompose 구현 안 함 · <b>자동 커밋·푸시 없음</b> · --max-agent-calls 예산 · --stop-after. 테스트 없음 → <code>--dry-run</code> 바이트 패리티. <b>도그푸딩</b>: 크로스모델 리뷰가 실제 안전 회귀·설계 갭을 잡아냄.</p></div>
+      <div class="card"><h4>프로젝트 레지스트리</h4><p><code>--project &lt;name&gt;</code> → <code>projects/&lt;name&gt;/{config.json,runs}</code>. 우선순위: per-project &gt; global &gt; env &gt; default. 미지정 시 오늘과 100% 동일.</p></div>
+    </div>
+    <div class="grid g2">
+      <div class="card"><h4 style="color:var(--ok)">강점 (덱 렌즈)</h4><p>① 크로스모델 적대 리뷰(자기평가 편향 대응) ② high-risk 사람 승인 게이트(Permission "승인" 구현) ③ 외부·비침투(재사용성) ④ high-risk opus/xhigh 승격 ⑤ 결정적 파이프라인 + resume 핸드오프</p></div>
+      <div class="card"><h4 style="color:var(--danger)">빈틈</h4><p>① 실행 테스트 게이트 없음(dry-run·리뷰로 대체) ② 병렬은 제한적(decompose 실행기, 라이브 미검증) ③ 경로 격자가드·시크릿 차단 없음 ④ 상시 상태 외부화 약함 ⑤ MCP·도구층 미미 ⑥ 키워드 라우팅 취약</p></div>
+    </div>
+    <div class="quote">harness-test가 "가드레일·결정론 검증"으로 강하다면, AutoAgent는 "크로스모델 + 사람 승인 + 외부 분리"로 강하다. 덱의 이상형에서 <b>Permission의 '승인 루프'와 자기평가 편향 대응</b>을 정면 구현했고, <b>Verification(테스트)·Tool</b>이 비어 있고, 병렬은 제한적 구현(미검증)이다.</div>
+  </section>
+</main>
+
+<footer>
+  문서 3 · AutoAgent 분석 (우리 하네스) · 2026-07-12 · 짝 문서 <code>docs/3_우리하네스_AutoAgent.md</code><br>
+  정본 <code>README.md</code> · 상세 <code>docs/AutoAgent_하네스개요.md</code> · 시리즈: ① 프레임워크 · ② harness-test
+</footer>
+<script>
+  var tabs=[].slice.call(document.querySelectorAll('nav a.tab')), secs=tabs.map(function(t){return document.querySelector(t.getAttribute('href'))});
+  function s(){var y=window.scrollY+130,a=-1;for(var i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop<=y)a=i;}tabs.forEach(function(t,i){t.style.color=i===a?'var(--ink)':'';t.style.background=i===a?'var(--panel2)':'';});}
+  window.addEventListener('scroll',s,{passive:true});s();
+</script>
+</body>
+</html>

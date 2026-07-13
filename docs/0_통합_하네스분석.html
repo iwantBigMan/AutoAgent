@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>통합 하네스 분석 — 프레임워크 · harness-test · AutoAgent</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1e222e; --line:#2b3040;
+    --ink:#e7e9ee; --muted:#9aa3b2; --dim:#6b7488;
+    --fw:#e6b23e; --fw-bg:#332a10; --fw-line:#7a6320;
+    --ht:#33c2c8; --ht-bg:#0f2e30; --ht-line:#1c5f62;
+    --aa:#a988ff; --aa-bg:#231a3a; --aa-line:#4a3878;
+    --accent:#7aa2ff; --danger:#e5687a; --ok:#42c98a;
+    --radius:14px;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+    --sans:-apple-system,"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.65;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  nav{position:sticky;top:0;z-index:50;background:rgba(15,17,23,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  nav .wrap{max-width:1100px;margin:0 auto;padding:12px 22px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  nav .brand{font-weight:800;margin-right:auto;font-size:15px}
+  nav a.tab{color:var(--muted);font-size:13px;padding:6px 10px;border-radius:9px}
+  nav a.tab:hover{color:var(--ink);background:var(--panel2)}
+  main{max-width:1100px;margin:0 auto;padding:0 22px 100px}
+  section{padding:54px 0 8px;border-top:1px solid var(--line)}
+  section:first-of-type{border-top:none}
+  h1{font-size:clamp(28px,4.6vw,44px);line-height:1.14;margin:0 0 16px;letter-spacing:-.5px}
+  h2{font-size:25px;margin:0 0 6px;letter-spacing:-.3px}
+  h2 .n{color:var(--dim);font-variant-numeric:tabular-nums;margin-right:10px;font-weight:700}
+  .part{font-size:12px;letter-spacing:2px;text-transform:uppercase;font-weight:800;margin:0 0 4px}
+  .lead{color:var(--muted);font-size:16.5px;max-width:74ch}
+  h3{font-size:16px;margin:26px 0 10px}
+  p{margin:12px 0} code{font-family:var(--mono);font-size:.88em;background:var(--panel2);padding:1px 6px;border-radius:6px;color:#cfd6e6}
+  .muted{color:var(--muted)} .fw{color:var(--fw)} .ht{color:var(--ht)} .aa{color:var(--aa)}
+  .hero{padding:76px 0 38px;border-top:none}
+  .eyebrow{display:inline-block;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:var(--accent);border:1px solid var(--line);padding:5px 12px;border-radius:999px;margin-bottom:20px}
+  .thesis{font-size:19px;max-width:76ch;margin:18px 0}
+  .thesis b{color:#fff;background:linear-gradient(transparent 62%,rgba(122,162,255,.24) 0);padding:0 2px}
+  .subjects{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:26px}
+  @media(max-width:820px){.subjects{grid-template-columns:1fr}}
+  .subj{border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;background:var(--panel);border-top-width:3px}
+  .subj.fw{border-top-color:var(--fw)} .subj.ht{border-top-color:var(--ht)} .subj.aa{border-top-color:var(--aa)}
+  .subj .role{font-size:11.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase}
+  .subj.fw .role{color:var(--fw)} .subj.ht .role{color:var(--ht)} .subj.aa .role{color:var(--aa)}
+  .subj h4{margin:6px 0 6px;font-size:16px} .subj p{margin:0;font-size:13px;color:var(--muted)}
+  .subj a{font-size:12px}
+  .grid{display:grid;gap:14px;margin-top:18px}
+  .g3{grid-template-columns:repeat(3,1fr)} @media(max-width:820px){.g3{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px}
+  .card.fw{border-top:3px solid var(--fw)} .card.ht{border-top:3px solid var(--ht)} .card.aa{border-top:3px solid var(--aa)}
+  .card h4{margin:0 0 6px;font-size:15px} .card p{margin:6px 0 0;font-size:13px;color:var(--muted)}
+  .tbl{overflow-x:auto;margin:18px 0}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:600px}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:700;font-size:11.5px;letter-spacing:.4px;text-transform:uppercase}
+  tbody tr:hover{background:var(--panel)} td b{color:#fff}
+  th.fw,td.fw-c{background:rgba(230,178,62,.06)} th.ht,td.ht-c{background:rgba(51,194,200,.06)} th.aa,td.aa-c{background:rgba(169,136,255,.07)}
+  .stars{letter-spacing:2px}
+  .yes{color:var(--ok);font-weight:700} .no{color:var(--danger);font-weight:700} .warn{color:var(--fw);font-weight:700}
+  .callout{border-left:3px solid var(--accent);background:#131826;border-radius:0 12px 12px 0;padding:13px 17px;margin:16px 0;font-size:13.5px}
+  .callout b{color:#b9ccff}
+  .flag{border-left:3px solid var(--danger);background:#1c1418;border-radius:0 12px 12px 0;padding:12px 17px;margin:16px 0;font-size:13.5px}
+  .flag b{color:#f0a0ac}
+  .quote{border-left:3px solid var(--accent);background:var(--panel);border-radius:0 12px 12px 0;padding:12px 17px;margin:14px 0;font-size:14.5px;color:#dfe4ee;font-style:italic}
+  .debate{counter-reset:d;list-style:none;padding:0;margin:16px 0}
+  .debate li{position:relative;padding:13px 16px 13px 52px;background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:9px;font-size:14px}
+  .debate li::before{counter-increment:d;content:counter(d);position:absolute;left:15px;top:12px;width:25px;height:25px;border-radius:50%;background:#131826;border:1px solid #2c3a63;color:var(--accent);font-weight:800;font-size:12.5px;display:flex;align-items:center;justify-content:center}
+  footer{max-width:1100px;margin:0 auto;padding:28px 22px 60px;color:var(--dim);font-size:13px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+<nav><div class="wrap">
+  <div class="brand">통합 하네스 분석</div>
+  <a class="tab" href="#intro">개요</a>
+  <a class="tab" href="#p1">① 프레임워크</a>
+  <a class="tab" href="#p2">② harness-test</a>
+  <a class="tab" href="#p3">③ AutoAgent</a>
+  <a class="tab" href="#cmp">3자 비교</a>
+  <a class="tab" href="#debate">토론</a>
+</div></nav>
+
+<main>
+  <section class="hero" id="intro">
+    <span class="eyebrow">통합본 · integrated analysis</span>
+    <h1>세 개의 하네스를<br>하나의 자(尺)로 재본다</h1>
+    <p class="thesis">덱은 하네스의 <b>이상형</b>을 제시한다 — <b>AGENT = MODEL + HARNESS</b>,
+    Context·Tool·Permission·Verification 네 축. 이 자로 동료의 <b>harness-test</b>와 우리 <b>AutoAgent</b>를
+    나란히 재면, 각자가 어느 축에서 앞서고 어디가 비어 있는지가 드러난다.</p>
+    <div class="subjects">
+      <div class="subj fw"><div class="role">① 이상형 · 프레임워크</div><h4>tec-session 덱 (64p)</h4>
+        <p>하네스 이론. 모두가 재는 자.</p><a href="1_이상형_프레임워크덱.html">문서 1 →</a></div>
+      <div class="subj ht"><div class="role">② 동료 하네스</div><h4>harness-test</h4>
+        <p>policy+훅+워크플로우+커맨드 4층. 가드레일 강제형 <b>두꺼운</b> 하네스.</p><a href="2_동료하네스_harness-test.html">문서 2 →</a></div>
+      <div class="subj aa"><div class="role">③ 우리 하네스</div><h4>AutoAgent</h4>
+        <p>크로스모델+승인게이트+외부 비침투. 중간 두께.</p><a href="3_우리하네스_AutoAgent.html">문서 3 →</a></div>
+    </div>
+    <p class="muted" style="margin-top:18px">이 통합본은 각 문서를 요약하고, 핵심으로 <b>Part 4 · 3자 비교</b>를 담는다. 전체 상세는 개별 문서(①②③)를 참조.</p>
+  </section>
+
+  <!-- P1 -->
+  <section id="p1">
+    <p class="part fw">Part 1 · 요약</p>
+    <h2><span class="n">01</span>프레임워크 덱 (이상형)</h2>
+    <div class="quote">"AGENT = MODEL + HARNESS. 원시 LLM은 운영체제 없는 CPU. 좋은 답변은 모델이 일하는 환경에서 나온다."</div>
+    <div class="grid g3">
+      <div class="card fw"><h4>4축 + 사다리</h4><p>Context·Tool·Permission·Verification. Raw LLM → Subagent → Agent Team → Harness.</p></div>
+      <div class="card fw"><h4>왜 실패하나</h4><p>Context Degradation(1M 벤치 <b>18.5%</b> vs <b>76%</b>) + Self-Eval Bias → 외부 Evaluator. Solo 20분/$9 vs Full 6h/$200.</p></div>
+      <div class="card fw"><h4>패턴 · 두께</h4><p>GAN·3-agent·Ralph·Permission·Tool P1~P6. 얇음(Claude SDK)→두꺼움(LangGraph). "두께=위험·반복·실패비용의 함수".</p></div>
+    </div>
+    <p class="muted">→ 전체: <a href="1_이상형_프레임워크덱.html">문서 1 · 프레임워크 덱</a></p>
+  </section>
+
+  <!-- P2 -->
+  <section id="p2">
+    <p class="part ht">Part 2 · 요약</p>
+    <h2><span class="n">02</span>harness-test (동료 하네스)</h2>
+    <div class="quote">"정책(policy.json) + 훅 강제 + 자율 워크플로우 + 커맨드 4층. 가드레일을 먼저 깔고 자율 팬아웃. 한 작업=한 브랜치."</div>
+    <div class="grid g3">
+      <div class="card ht"><h4>Permission ★★★</h4><p>policy 격자형 경계 + guard-paths 사전검사 + 시크릿 차단. (승인 루프는 없음)</p></div>
+      <div class="card ht"><h4>Verification ★★★</h4><p>3중 결정론 게이트(유닛·계약 schemathesis·화면 Playwright). LLM 평가자 배제, exit code만.</p></div>
+      <div class="card ht"><h4>Orchestration ★★★</h4><p>15에이전트·8워크플로우·루프가드(MAX_ROUNDS+무진전감지+예산+회귀금지).</p></div>
+    </div>
+    <p class="muted">빈틈: 크로스모델 없음 · 승인 게이트 없음 · MCP 전역접근. → 전체: <a href="2_동료하네스_harness-test.html">문서 2 · harness-test</a></p>
+  </section>
+
+  <!-- P3 -->
+  <section id="p3">
+    <p class="part aa">Part 3 · 요약</p>
+    <h2><span class="n">03</span>AutoAgent (우리 하네스)</h2>
+    <div class="quote">"Claude·Codex를 서브프로세스로 구동해 별도 타깃을 두 모델이 교대로 구현·리뷰. 위험 변경은 사람 승인 게이트를 통과해야."</div>
+    <div class="grid g3">
+      <div class="card aa"><h4>크로스모델 ★</h4><p>리뷰어는 항상 구현자의 반대 모델. 덱의 "자기평가 편향"에 대한 정면 대응.</p></div>
+      <div class="card aa"><h4>Permission ★★</h4><p><b>사람 승인 게이트(high-risk/db)</b> + 권한모드 + 샌드박스 + git 베이스라인.</p></div>
+      <div class="card aa"><h4>외부·비침투</h4><p>타깃 밖 오케스트레이터, 자동 커밋 없음, high-risk opus/xhigh 승격.</p></div>
+    </div>
+    <p class="muted">빈틈: 실행 테스트 없음(dry-run·리뷰로 대체) · 병렬은 제한적(decompose 실행기, 미검증) · 경로 격자가드 없음. → 전체: <a href="3_우리하네스_AutoAgent.html">문서 3 · AutoAgent</a></p>
+  </section>
+
+  <!-- COMPARISON -->
+  <section id="cmp">
+    <p class="part" style="color:var(--accent)">Part 4 · 핵심</p>
+    <h2><span class="n">04</span>3자 비교 (프레임워크 렌즈)</h2>
+    <div class="flag"><b>정확성 주의:</b> harness-test 조사 서브에이전트가 AutoAgent 기능을 일부 부풀렸다(자동 순서도 생성·실시간 토큰 모니터링·에이전트별 MCP 능력정의는 <b>AutoAgent에 없음</b>). 아래는 실제 코드 기준 교정본.</div>
+
+    <h3>4축 성숙도</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>축</th><th class="fw">프레임워크 이상형</th><th class="ht">harness-test</th><th class="aa">AutoAgent</th></tr></thead>
+      <tbody>
+        <tr><td><b>Context</b></td><td class="fw-c">목표문서+지도+메모리+핸드오프</td><td class="ht-c"><span class="stars ht">★★★</span> CODEMAPS·worklog·ADR</td><td class="aa-c"><span class="stars aa">★★</span> run 산출물·checkpoint</td></tr>
+        <tr><td><b>Tool</b></td><td class="fw-c">최소·고임팩트·설명</td><td class="ht-c"><span class="stars ht">★★</span> MCP 4 + 스킬 7</td><td class="aa-c"><span class="stars aa">★</span> MCP 거의 없음</td></tr>
+        <tr><td><b>Permission</b></td><td class="fw-c">허용/승인/금지 + 경계</td><td class="ht-c"><span class="stars ht">★★★</span> 경로가드+시크릿차단 <span class="muted">(승인 약함)</span></td><td class="aa-c"><span class="stars aa">★★</span> <b>사람 승인 게이트</b>+권한모드</td></tr>
+        <tr><td><b>Verification</b></td><td class="fw-c">계산적 테스트 + Evaluator</td><td class="ht-c"><span class="stars ht">★★★</span> 3중 결정론 게이트</td><td class="aa-c"><span class="stars aa">★</span> dry-run + 크로스모델 리뷰</td></tr>
+        <tr><td><b>Orchestration</b></td><td class="fw-c">역할 분업 + 루프</td><td class="ht-c"><span class="stars ht">★★★</span> 15에이전트·루프가드</td><td class="aa-c"><span class="stars aa">★★</span> 9역할 고정 + 예산</td></tr>
+      </tbody>
+    </table></div>
+    <div class="callout"><b>핵심 그림:</b> <span class="ht">harness-test는 Verification·Permission(가드레일)</span>에서 앞서고, <span class="aa">AutoAgent는 Permission의 "승인 루프"와 크로스모델 검증</span>에서 앞선다. 둘은 서로의 빈틈을 메운다.</div>
+
+    <h3>덱 패턴 채택</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>프레임워크 패턴</th><th class="ht">harness-test</th><th class="aa">AutoAgent</th></tr></thead>
+      <tbody>
+        <tr><td>Plan → Execute</td><td class="ht-c yes">✅ design→feature</td><td class="aa-c yes">✅ preamble</td></tr>
+        <tr><td>Generate ↔ Review (GAN)</td><td class="ht-c yes">✅ executor↔evaluator</td><td class="aa-c yes">✅ <b>크로스모델</b></td></tr>
+        <tr><td>Router</td><td class="ht-c warn">⚠️ 커맨드 수동</td><td class="aa-c yes">✅ route_task</td></tr>
+        <tr><td>Expert Team</td><td class="ht-c yes">✅ 15 에이전트</td><td class="aa-c warn">⚠️ 9 역할</td></tr>
+        <tr><td>Parallel</td><td class="ht-c yes">✅ parallel()</td><td class="aa-c warn">⚠️ 제한적(decompose, 미검증)</td></tr>
+        <tr><td>Human Approval</td><td class="ht-c no">❌ 거의 없음</td><td class="aa-c yes">✅ <b>승인 게이트+resume</b></td></tr>
+        <tr><td>Tool Gate</td><td class="ht-c yes">✅ policy 경로가드</td><td class="aa-c warn">⚠️ 권한모드/샌드박스</td></tr>
+        <tr><td>Verification Loop</td><td class="ht-c yes">✅ 3중 테스트</td><td class="aa-c warn">⚠️ dry-run+리뷰</td></tr>
+        <tr><td>Memory/Evolution</td><td class="ht-c yes">✅ worklog·active-work</td><td class="aa-c warn">⚠️ run 아카이브</td></tr>
+        <tr><td>Worktree 격리</td><td class="ht-c warn">⚠️ 브랜치 단위</td><td class="aa-c warn">⚠️ decompose 레인별(routed/simple 비침투)</td></tr>
+      </tbody>
+    </table></div>
+
+    <h3>근본 성향 차이</h3>
+    <div class="tbl"><table>
+      <thead><tr><th></th><th class="ht">harness-test</th><th class="aa">AutoAgent</th></tr></thead>
+      <tbody>
+        <tr><td><b>하네스 위치</b></td><td class="ht-c">앱 레포 <b>안</b>(.claude 동거)</td><td class="aa-c"><b>외부</b> 오케스트레이터</td></tr>
+        <tr><td><b>타깃 변경</b></td><td class="ht-c">직접 커밋·PR</td><td class="aa-c"><b>자동 커밋 안 함</b>(diff는 사람)</td></tr>
+        <tr><td><b>모델 전략</b></td><td class="ht-c">역할별 <b>정적</b></td><td class="aa-c"><b>크로스모델</b> + high-risk opus 승격</td></tr>
+        <tr><td><b>통제 방식</b></td><td class="ht-c"><b>가드레일 강제</b></td><td class="aa-c"><b>승인 게이트</b> + 결정적 파이프라인</td></tr>
+        <tr><td><b>검증 신뢰원</b></td><td class="ht-c"><b>결정론 테스트</b></td><td class="aa-c">크로스모델 리뷰 + dry-run</td></tr>
+        <tr><td><b>두께(덱 기준)</b></td><td class="ht-c"><b>두꺼움</b></td><td class="aa-c">중간</td></tr>
+      </tbody>
+    </table></div>
+    <div class="quote">공통점 — 둘 다 결정적 스크립트로 에이전트를 감싸고, 파일 기반 통신·역할 분리·루프 상한·상태 외부화를 지킨다.</div>
+  </section>
+
+  <section id="debate">
+    <p class="part" style="color:var(--accent)">Part 4 · 핵심</p>
+    <h2><span class="n">05</span>토론 포인트</h2>
+    <ol class="debate">
+      <li><b>검증 vs 승인</b> — 3중 결정론 게이트 vs 사람 승인 게이트, 무엇이 먼저? 둘을 합치면?</li>
+      <li><b>크로스모델의 값어치</b> — 두 모델 교차 비용 대비, 결정론 테스트로 품질 잡는 편이 싸지 않나?</li>
+      <li><b>하네스 두께</b> — 우리 도메인은 harness-test급 두꺼움인가, AutoAgent의 중간인가?</li>
+      <li><b>침투 vs 분리</b> — 앱 안 vs 외부 오케스트레이터, 재사용성 vs 밀착 자동화.</li>
+      <li><b>비계 걷어내기</b> — 덱의 건강성 체크를 적용하면 어디가 과설계인가?</li>
+    </ol>
+  </section>
+</main>
+
+<footer>
+  통합 하네스 분석 · 프레임워크 · harness-test · AutoAgent · 2026-07-12 · 짝 문서 <code>docs/0_통합_하네스분석.md</code><br>
+  개별 상세: <a href="1_이상형_프레임워크덱.html">① 프레임워크</a> · <a href="2_동료하네스_harness-test.html">② harness-test</a> · <a href="3_우리하네스_AutoAgent.html">③ AutoAgent</a>
+</footer>
+<script>
+  var tabs=[].slice.call(document.querySelectorAll('nav a.tab')), secs=tabs.map(function(t){return document.querySelector(t.getAttribute('href'))});
+  function s(){var y=window.scrollY+130,a=-1;for(var i=0;i<secs.length;i++){if(secs[i]&&secs[i].offsetTop<=y)a=i;}tabs.forEach(function(t,i){t.style.color=i===a?'var(--ink)':'';t.style.background=i===a?'var(--panel2)':'';});}
+  window.addEventListener('scroll',s,{passive:true});s();
+</script>
+</body>
+</html>

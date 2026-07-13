@@ -53,10 +53,17 @@ AutoAgent/
 |   +-- routing.py
 |   +-- safety.py
 |   +-- artifacts.py
+|   +-- roles.py
+|   +-- worktree.py
 |   +-- workflows/
 |       +-- simple.py
 |       +-- routed.py
+|       +-- routed_preamble.py
+|       +-- routed_impl.py
+|       +-- routed_docs.py
+|       +-- routed_common.py
 |       +-- decompose.py
+|       +-- task_exec.py
 +-- prompts/
 |   +-- simple/
 |   +-- decompose/
@@ -66,6 +73,11 @@ AutoAgent/
 |   |   +-- frontend/
 |   |   +-- final/
 |   +-- README.md
++-- roles.default.json
++-- projects/
+|   +-- <name>/
+|       +-- config.json
+|       +-- runs/
 +-- runs/
 +-- autoagent.config.json
 +-- README.md
@@ -143,12 +155,14 @@ DB subtype 프롬프트는 데이터 손실, 호환성, 마이그레이션 upgra
 - `--workflow decompose`
 - `--task-type auto|backend|frontend|docs|review`
 - `--implementer auto|claude|codex`
+- `--project <name>` (프로젝트 레지스트리: `projects/<name>/config.json` + `projects/<name>/runs/` 사용)
 - `--read-only`
 - `--max-review-rounds 1`
 - `--max-agent-calls 0`
 - `--stop-after none|context|architecture|validation|implementation|review|final-review|evaluation|report`
 - `--require-human-approval`
-- `--resume <run_dir>` (게이트에서 정지한 run을 사람이 검토·승인한 뒤 구현 단계부터 재개)
+- `--resume <run_dir>` (게이트에서 정지한 run을 사람이 검토·승인한 뒤 재개. `checkpoint.json`의 `mode`로 분기 —
+  `mode: task_graph`면 decompose 병렬 실행기로, 그 외에는 routed 구현 단계 재개로 이어짐)
 
 기본값:
 
@@ -204,6 +218,19 @@ Implementer 선택:
 ```
 
 `codex_reasoning_effort`는 재현성을 위해 config에 저장됩니다. CLI 호환성이 달라질 수 있어 하네스가 `codex exec -c` 오버라이드로 주입하지는 않습니다. 필요하면 `~/.codex/config.toml`에 설정하세요.
+
+## MCP 도구 (선택)
+
+config의 `mcp_allowed_tools`(기본 `[]`)에 MCP 툴 패턴을 넣으면, 하네스가 **Claude** 서브프로세스 명령에 `--allowedTools`로 주입합니다. 헤드리스 `claude -p`의 읽기 역할(`--permission-mode plan`)은 승인 TTY가 없어 allowlist 없이는 MCP 툴 호출이 거부되기 때문입니다(설계: `docs/specs/2026-07-13-mcp-integration-design.md`).
+
+```json
+{ "mcp_allowed_tools": ["mcp__serena", "mcp__context7"] }
+```
+
+- 서버 **발견**은 타깃 레포의 `.mcp.json`(Claude 자동 로드)에 맡깁니다. 이 키는 allowlist 주입만 담당합니다.
+- **Codex**는 `--ask-for-approval never`라 allowlist 없이도 MCP 툴을 쓰므로 이 키의 영향을 받지 않습니다. Codex용 서버는 `~/.codex/config.toml`의 `[mcp_servers.*]`에 둡니다. 크로스모델 대칭을 위해 **로컬(무네트워크) 서버**(예: Serena)는 같은 것을 양쪽에 등록하세요.
+- **네트워크 MCP 주의**: 웹 fetch·Context7 등 네트워크가 필요한 MCP는 **Codex `exec`에서 차단**됩니다(read-only·workspace-write·`network_access=true` 모두, 실측). 따라서 네트워크 MCP는 Claude 전용으로만 쓰고, Codex 쪽엔 등록하지 마세요(등록해도 동작 안 함). 설계: `docs/specs/2026-07-13-mcp-integration-design.md` §6.3.
+- 비어 있으면(기본) `--allowedTools`를 붙이지 않아 기존 명령과 바이트 동일합니다(opt-in).
 
 ## 루프 제한
 
@@ -340,7 +367,20 @@ Task graph 스키마(필드명·enum값은 코드가 파싱하므로 영문 유�
 }
 ```
 
-현재 버전은 task graph 승인 후 정지합니다. 그래프로부터의 task 실행은 후속 워크플로우입니다(설계: `docs/specs/2026-07-09-task-graph-execution-design.md`).
+현재 버전은 task graph 승인 후 정지합니다. 이제 그래프로부터의 task 실행이 구현되어 있으며,
+decompose 승인 게이트를 사람이 검토한 뒤 `--resume`로 병렬 실행됩니다(설계:
+`docs/specs/2026-07-12-decompose-parallel-executor-design.md`).
+
+### Decompose 병렬 실행기
+
+`decompose`가 승인 게이트에서 정지하면, 사람이 `approval_brief.md`를 검토한 뒤
+`--resume <run_dir>`(checkpoint `mode: task_graph`)로 실행기(`task_exec.py`)를 기동합니다.
+task graph를 위상정렬해 파도(wave) 단위로 진행하며, 같은 파도 안의 노드는 각각 격리된
+git worktree(레인 브랜치)에서 구현→반대모델 리뷰→수정을 거칩니다. 완료된 레인들은
+통합 브랜치 `aa-integration/<stamp>`로 순차 병합되고, main은 건드리지 않습니다.
+동시성 상한은 config의 `max_parallel_lanes`(기본 2)이며, `1`이면 사실상 순차 실행입니다.
+다만 이 실행기는 dry-run·단위·코드리뷰까지만 검증되었고, 라이브 end-to-end 실행은
+아직 확인되지 않았습니다.
 
 ## 출력
 
