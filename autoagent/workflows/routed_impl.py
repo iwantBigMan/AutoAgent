@@ -296,6 +296,8 @@ def command_for_agent(
             resolved.permission_mode,
             resolved.effort,
             skip_permissions=resolved.skip_permissions,
+            allowed_tools=config.mcp_allowed_tools,
+            mcp_config_path=config.mcp_config_path,
         )
     if resolved.agent == "codex":
         return codex_exec_command(config, resolved_command or config.codex_command, resolved.sandbox, resolved.model)

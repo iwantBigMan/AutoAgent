@@ -31,7 +31,7 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
 
     if args.dry_run:
         write_text(run_dir / "01_plan_prompt.md", plan_prompt)
-        write_command_artifact(run_dir, "01_claude_plan", claude_command(config.claude_command, config.claude_model))
+        write_command_artifact(run_dir, "01_claude_plan", claude_command(config.claude_command, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path))
         print(f"Dry run written to {run_dir}")
         return 0
 
@@ -42,7 +42,7 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         budget.before_call(next_step="plan", out_dir=run_dir, dry_run=args.dry_run)
         plan = run_process(
             name="01_claude_plan",
-            command=claude_command(claude, config.claude_model),
+            command=claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
             prompt=plan_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -89,7 +89,7 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         budget.before_call(next_step="review", out_dir=run_dir, dry_run=args.dry_run)
         review = run_process(
             name="03_claude_review",
-            command=claude_command(claude, config.claude_model),
+            command=claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
             prompt=review_prompt,
             cwd=config.workspace,
             out_dir=run_dir,

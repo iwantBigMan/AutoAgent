@@ -102,6 +102,11 @@ def main() -> int:
     config = load_config(Path(args.config), project=args.project)
     from autoagent.roles import load_roles, validate_roles
     validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent)
+    # MCP(증분 2): Codex의 [mcp_servers.*]와 서버 대칭을 시작 시 검사한다(불일치는 경고, 차단 아님).
+    # Claude용 config 파일(.aa_mcp.json)은 run_dir이 정해진 뒤 생성한다(실행별 격리 + dry-run 무영향).
+    from autoagent.mcp import write_claude_mcp_config, check_mcp_symmetry
+    for _mcp_warning in check_mcp_symmetry(config):
+        print(f"[mcp] {_mcp_warning}")
     if args.workspace:
         config.workspace = Path(args.workspace)
 
@@ -111,6 +116,8 @@ def main() -> int:
         if args.request or args.request_file:
             raise SystemExit("--resume cannot be combined with --request/--request-file.")
         run_dir = Path(args.resume)
+        # 재개 run의 run_dir 밑에 Claude용 MCP config 생성(dry-run이면 경로만, 파일 미기록).
+        config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
             return run_task_graph_execution(args, config, run_dir)
@@ -124,6 +131,7 @@ def main() -> int:
         raise SystemExit("Request is empty.")
 
     run_dir = make_run_dir(project=args.project)
+    config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
     write_text(run_dir / "00_request.md", request)
     write_metadata(
         run_dir,

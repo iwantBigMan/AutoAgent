@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,13 @@ class Config:
     default_max_agent_calls_review: int
     default_max_agent_calls_implementation: int
     max_parallel_lanes: int = 2
+    # Claude 서브프로세스에 주입할 MCP 툴 allowlist(예: ["mcp__serena", "mcp__context7"]).
+    # 비어 있으면(기본) --allowedTools를 붙이지 않아 기존 명령과 바이트 동일하다(opt-in).
+    mcp_allowed_tools: list[str] = field(default_factory=list)
+    # 하네스가 Claude에 --mcp-config로 넘길 MCP 서버 정의(.mcp.json의 mcpServers 형태).
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
+    # mcp_servers로 생성한 Claude용 config 파일 경로(cli가 런타임에 채움; config JSON엔 없음).
+    mcp_config_path: str | None = None
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
@@ -87,4 +94,6 @@ def load_config(path: Path, project: str | None = None) -> Config:
         default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
         default_max_agent_calls_implementation=int(raw.get("default_max_agent_calls_implementation") or 9),
         max_parallel_lanes=int(raw.get("max_parallel_lanes") or 2),
+        mcp_allowed_tools=list(raw.get("mcp_allowed_tools") or []),
+        mcp_servers=dict(raw.get("mcp_servers") or {}),
     )
