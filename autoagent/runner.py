@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from autoagent.artifacts import write_text
@@ -35,25 +36,26 @@ class AgentCallBudgetStopped(Exception):
 class AgentCallBudget:
     max_agent_calls: int
     used_agent_calls: int = 0
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def before_call(self, *, next_step: str, out_dir: Path, dry_run: bool) -> None:
-        # 매 에이전트 호출 직전에 부른다. 예산(max_agent_calls>0)을 넘기면
-        # stopped_by_budget.md를 남기고 AgentCallBudgetStopped로 안전 종료.
-        # dry_run은 실제 호출이 아니므로 카운트하지 않는다.
+        # 매 에이전트 호출 직전에 부른다. dry_run은 실제 호출이 아니므로 카운트/체크하지 않는다.
         if dry_run:
             return
-        if self.max_agent_calls > 0 and self.used_agent_calls >= self.max_agent_calls:
-            write_text(
-                out_dir / "stopped_by_budget.md",
-                "# Stopped by Agent Call Budget\n\n"
-                "The run stopped before the next agent call.\n\n"
-                f"- max_agent_calls: {self.max_agent_calls}\n"
-                f"- used_agent_calls: {self.used_agent_calls}\n"
-                f"- next_step: {next_step}\n"
-                "- reason: Agent call budget exhausted.\n",
-            )
-            raise AgentCallBudgetStopped(next_step, out_dir)
-        self.used_agent_calls += 1
+        # 병렬 레인이 하나의 예산 풀을 공유하므로 check-then-increment를 락으로 원자화한다.
+        with self._lock:
+            if self.max_agent_calls > 0 and self.used_agent_calls >= self.max_agent_calls:
+                write_text(
+                    out_dir / "stopped_by_budget.md",
+                    "# Stopped by Agent Call Budget\n\n"
+                    "The run stopped before the next agent call.\n\n"
+                    f"- max_agent_calls: {self.max_agent_calls}\n"
+                    f"- used_agent_calls: {self.used_agent_calls}\n"
+                    f"- next_step: {next_step}\n"
+                    "- reason: Agent call budget exhausted.\n",
+                )
+                raise AgentCallBudgetStopped(next_step, out_dir)
+            self.used_agent_calls += 1
 
 
 def claude_command(
