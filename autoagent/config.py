@@ -23,6 +23,25 @@ def _effort_default(value: str | None, default: str) -> str:
     return default if value is None else value
 
 
+def _merge_tiers(
+    default: dict[str, dict[str, dict[str, Any]]],
+    override: dict[str, dict[str, dict[str, Any]]],
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """기본 팔레트에 config override를 (agent, 티어) 단위로 필드 병합한다.
+
+    override가 준 티어의 필드만 기본값 위에 덮는다(effort만 바꾸는 부분 override 허용).
+    override에만 있는 agent/티어는 그대로 추가한다.
+    """
+    merged = {a: {t: dict(fields) for t, fields in tiers.items()} for a, tiers in default.items()}
+    for agent, tiers in override.items():
+        dst = merged.setdefault(agent, {})
+        for tname, fields in tiers.items():
+            base = dict(dst.get(tname, {}))
+            base.update(fields or {})
+            dst[tname] = base
+    return merged
+
+
 @dataclass
 class Config:
     """하네스 전역 설정 값 묶음(모델/effort/샌드박스/타임아웃/예산 기본값 등)."""
@@ -59,6 +78,9 @@ class Config:
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     # mcp_servers로 생성한 Claude용 config 파일 경로(cli가 런타임에 채움; config JSON엔 없음).
     mcp_config_path: str | None = None
+    # 역할↔모델 매핑 팔레트: tiers[agent][tier명] = {"model": str, "effort": str | None}.
+    # load_config가 기존 전역값에서 기본 팔레트를 합성하고 config의 "tiers"로 덮는다.
+    tiers: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
@@ -89,6 +111,31 @@ def load_config(path: Path, project: str | None = None) -> Config:
         or r"C:\Users\systran\Desktop\LanguageDetection"
     )
 
+    # 모델/effort 기본값(팔레트 합성과 Config 양쪽에서 재사용).
+    claude_model = raw.get("claude_model") or "sonnet"
+    claude_high_risk_model = raw.get("claude_high_risk_model") or "opus"
+    claude_effort = raw.get("claude_effort") or "high"
+    claude_high_risk_effort = raw.get("claude_high_risk_effort") or "xhigh"
+    codex_model = raw.get("codex_model") or "gpt-5.6-sol"
+    codex_reasoning_effort = _effort_default(raw.get("codex_reasoning_effort"), "medium")
+    codex_high_risk_effort = _effort_default(raw.get("codex_high_risk_effort"), "high")
+
+    # 기본 팔레트 — 기존 전역값에서 합성해 동작을 보존한다. cheap 티어는 재튜닝/B 대비 "정의만".
+    default_tiers = {
+        "claude": {
+            "standard": {"model": claude_model, "effort": claude_effort},
+            "deep": {"model": claude_high_risk_model, "effort": claude_high_risk_effort},
+            "light": {"model": claude_model, "effort": None},
+            "cheap": {"model": "haiku", "effort": None},
+        },
+        "codex": {
+            "standard": {"model": codex_model, "effort": codex_reasoning_effort},
+            "deep": {"model": codex_model, "effort": codex_high_risk_effort},
+            "cheap": {"model": "gpt-5.6-terra", "effort": "low"},
+        },
+    }
+    tiers = _merge_tiers(default_tiers, raw.get("tiers") or {})
+
     return Config(
         workspace=workspace,
         claude_command=raw.get("claude_command") or "claude.cmd",
@@ -96,22 +143,22 @@ def load_config(path: Path, project: str | None = None) -> Config:
         codex_sandbox=raw.get("codex_sandbox") or "workspace-write",
         codex_approval=raw.get("codex_approval") or "never",
         timeout_seconds=int(raw.get("timeout_seconds") or 3600),
-        claude_model=raw.get("claude_model") or "sonnet",
-        claude_high_risk_model=raw.get("claude_high_risk_model") or "opus",
+        claude_model=claude_model,
+        claude_high_risk_model=claude_high_risk_model,
         # headless `claude -p --effort`는 low/medium/high/xhigh/max만 받는다("ultracode"는
         # 대화형 전용이라 무시됨). high-risk(opus)는 ultracode의 추론 강도에 해당하는 xhigh.
-        claude_effort=raw.get("claude_effort") or "high",
-        claude_high_risk_effort=raw.get("claude_high_risk_effort") or "xhigh",
+        claude_effort=claude_effort,
+        claude_high_risk_effort=claude_high_risk_effort,
         # mutating(구현/수정) Claude 스텝의 권한 posture. 헤드리스에선 승인 TTY가 없어
         # 편집이 차단되므로 최소 acceptEdits가 필요하다.
         #   "acceptEdits"      = 파일 편집만 자동, bash/네트워크는 차단(안전 기본값).
         #   "bypassPermissions"= --dangerously-skip-permissions, 명령·네트워크까지 자율(opt-in, 무샌드박스).
         claude_impl_permission=raw.get("claude_impl_permission") or "acceptEdits",
-        codex_model=raw.get("codex_model") or "gpt-5.6-sol",
+        codex_model=codex_model,
         # codex effort는 `codex -c model_reasoning_effort=...`로 실제 주입한다(minimal/low/
         # medium/high/xhigh). 기본 medium, high-risk 구현/수정 때만 high로 승격.
-        codex_reasoning_effort=_effort_default(raw.get("codex_reasoning_effort"), "medium"),
-        codex_high_risk_effort=_effort_default(raw.get("codex_high_risk_effort"), "high"),
+        codex_reasoning_effort=codex_reasoning_effort,
+        codex_high_risk_effort=codex_high_risk_effort,
         default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
         default_max_agent_calls_implementation=int(raw.get("default_max_agent_calls_implementation") or 9),
         max_parallel_lanes=int(raw.get("max_parallel_lanes") or 2),
@@ -120,4 +167,5 @@ def load_config(path: Path, project: str | None = None) -> Config:
         verification_enabled=bool(raw.get("verification_enabled", True)),
         verification_commands=list(raw.get("verification_commands") or []),
         verification_timeout_seconds=int(raw.get("verification_timeout_seconds") or 1800),
+        tiers=tiers,
     )

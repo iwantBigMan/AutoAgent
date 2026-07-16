@@ -202,6 +202,13 @@ Reporter: Claude sonnet
 
 `--effort`(headless `claude -p`)는 low/medium/high/xhigh/max만 받습니다("ultracode"는 대화형 전용이라 무시됨). high-risk에서 opus에 xhigh를 부여하는 것이 "ultracode"의 추론 강도에 해당합니다. effort 값은 config의 `claude_effort`/`claude_high_risk_effort`로 조정합니다.
 
+역할별 모델·effort는 roles.default.json의 `tier`/`high_risk_tier`가 config의
+`tiers` 팔레트(agent→티어명→{model,effort})를 참조해 결정됩니다. 기본 팔레트는
+기존 전역값(claude_model/effort, codex_model/effort 등)에서 합성되므로 config를
+안 바꿔도 현행과 동일합니다. operator는 config `tiers`에 티어를 필드 단위로 override
+하거나 새 티어를 추가할 수 있고, 역할의 tier 참조만 바꿔 재배치할 수 있습니다.
+정의만 되어 있고 기본 매핑에서 미사용인 티어: claude `cheap`(haiku), codex `cheap`(gpt-5.6-terra).
+
 Implementer 선택:
 
 ```text

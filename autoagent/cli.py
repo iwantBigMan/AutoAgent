@@ -107,7 +107,7 @@ def main() -> int:
     args = build_parser().parse_args()
     config = load_config(Path(args.config), project=args.project)
     from autoagent.roles import load_roles, validate_roles
-    validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent)
+    validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent, config.tiers)
     # MCP(증분 2): Codex의 [mcp_servers.*]와 서버 대칭을 시작 시 검사한다(불일치는 경고, 차단 아님).
     # Claude용 config 파일(.aa_mcp.json)은 run_dir이 정해진 뒤 생성한다(실행별 격리 + dry-run 무영향).
     from autoagent.mcp import write_claude_mcp_config, check_mcp_symmetry
