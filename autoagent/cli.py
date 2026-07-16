@@ -75,12 +75,18 @@ def build_parser() -> argparse.ArgumentParser:
             "validation",
             "implementation",
             "review",
+            "verification",
             "final-review",
             "evaluation",
             "report",
         ],
         default="none",
         help="Stop after a routed workflow stage completes",
+    )
+    parser.add_argument(
+        "--skip-verification",
+        action="store_true",
+        help="Skip the post-implementation DB-free verification stage",
     )
     parser.add_argument(
         "--require-human-approval",
@@ -146,6 +152,7 @@ def main() -> int:
             "max_review_rounds": args.max_review_rounds,
             "max_agent_calls": args.max_agent_calls,
             "stop_after": args.stop_after,
+            "skip_verification": args.skip_verification,
             "require_human_approval": args.require_human_approval,
             "plan_only": args.plan_only,
             "skip_review": args.skip_review,
@@ -157,6 +164,7 @@ def main() -> int:
             "claude_impl_permission": config.claude_impl_permission,
             "codex_model": config.codex_model,
             "codex_reasoning_effort": config.codex_reasoning_effort,
+            "codex_high_risk_effort": config.codex_high_risk_effort,
         },
     )
 

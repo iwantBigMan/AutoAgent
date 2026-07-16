@@ -100,10 +100,14 @@ def resolve_role(
 
     # effort.
     effort_spec = entry["effort"]
-    if agent != "claude" or effort_spec == "none":
-        effort: str | None = None
-    else:  # "standard" | "tiered"
+    if agent == "codex":
+        # codex는 역할 effort_spec(claude 전용 티어링)과 무관하게 항상 config 값을 주입한다.
+        # high-risk 승격 조건을 만족하면(주로 route→codex 구현/수정) high, 아니면 medium.
+        effort: str | None = config.codex_high_risk_effort if escalate else config.codex_reasoning_effort
+    elif agent == "claude" and effort_spec != "none":  # "standard" | "tiered"
         effort = config.claude_high_risk_effort if escalate else config.claude_effort
+    else:
+        effort = None
 
     # 권한/샌드박스 — 병합된 command_for_agent(config-gated posture)와 동일하게 재현.
     permission_mode = None

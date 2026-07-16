@@ -15,6 +15,7 @@ from autoagent.config import Config
 from autoagent.roles import ResolvedRole, load_roles, resolve_role
 from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
 from autoagent.safety import review_needs_changes
+from autoagent.verification import default_commands, run_verification
 from autoagent.workflows.routed_common import run_evaluation, run_final_report, stop_after
 
 
@@ -130,6 +131,13 @@ def run_implementation_route(
     if stopped:
         return 0
 
+    # 1단계 검증 스테이지(구현/수정 뒤, 최종리뷰 전): DB-free 커맨드를 실제 실행하고
+    # 그 결과를 최종리뷰/평가/보고가 볼 수 있도록 implementation 문자열에 덧붙인다.
+    # 공유 프롬프트 템플릿은 건드리지 않아 동시 실행 중인 다른 런에 영향을 주지 않는다.
+    implementation = _maybe_run_verification(args, config, run_dir, implementation)
+    if stop_after(args, run_dir, "verification"):
+        return 0
+
     # 이후 최종리뷰/평가/보고는 최신 반영본 기준으로 진행한다.
     write_text(
         run_dir / "review_loop_status.md",
@@ -185,6 +193,26 @@ def run_implementation_route(
     stop_after(args, run_dir, "report")
     print(f"Routed run complete: {run_dir}")
     return 0
+
+
+def _maybe_run_verification(args: Namespace, config: Config, run_dir: Path, implementation: str) -> str:
+    """1단계 검증 스테이지를 실행하고 요약을 implementation 뒤에 덧붙여 반환한다.
+
+    dry-run/--skip-verification/verification_enabled=False면 실행하지 않고 원본을 그대로
+    돌려준다. 검증 실패는 예외를 던지지 않고 요약(PASS/FAIL)만 남긴다 — 최종리뷰/평가/보고가
+    실제 실행 결과를 근거로 삼게 하는 것이 목적이다(하드 중단은 사람 판단에 맡긴다).
+    """
+    if args.dry_run or getattr(args, "skip_verification", False) or not config.verification_enabled:
+        return implementation
+    commands = config.verification_commands or default_commands(config.workspace)
+    summary, ok = run_verification(
+        run_dir=run_dir,
+        workspace=config.workspace,
+        commands=commands,
+        timeout_seconds=config.verification_timeout_seconds,
+    )
+    print(f"Verification stage: {'PASS' if ok else 'FAIL'} ({run_dir})")
+    return f"{implementation}\n\n---\n{summary}"
 
 
 def run_final_review(
@@ -300,5 +328,7 @@ def command_for_agent(
             mcp_config_path=config.mcp_config_path,
         )
     if resolved.agent == "codex":
-        return codex_exec_command(config, resolved_command or config.codex_command, resolved.sandbox, resolved.model)
+        return codex_exec_command(
+            config, resolved_command or config.codex_command, resolved.sandbox, resolved.model, resolved.effort
+        )
     raise SystemExit(f"Unsupported agent: {resolved.agent}")

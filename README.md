@@ -182,8 +182,9 @@ Claude 기본: sonnet
 Claude high-risk: opus
 Claude effort 기본: high
 Claude high-risk effort: xhigh
-Codex: gpt-5.5
-Codex reasoning effort: high
+Codex: gpt-5.6-sol
+Codex reasoning effort: medium
+Codex high-risk effort: high
 ```
 
 역할 배치:
@@ -195,7 +196,7 @@ DB/high-risk Architect: Claude opus (effort xhigh)
 Implementer: --implementer auto|claude|codex로 선택
 DB/high-risk Implementer(claude): Claude opus (effort xhigh)
 Reviewer: 구현자와 반대 모델
-Evaluator: Codex gpt-5.5
+Evaluator: Codex gpt-5.6-sol
 Reporter: Claude sonnet
 ```
 
@@ -217,7 +218,7 @@ Implementer 선택:
   Docs/review/read-only 라우트는 구현하지 않음.
 ```
 
-`codex_reasoning_effort`는 재현성을 위해 config에 저장됩니다. CLI 호환성이 달라질 수 있어 하네스가 `codex exec -c` 오버라이드로 주입하지는 않습니다. 필요하면 `~/.codex/config.toml`에 설정하세요.
+Codex 추론 강도는 하네스가 `codex -c model_reasoning_effort="..."` 전역 오버라이드로 **실제 주입**합니다(값은 minimal/low/medium/high/xhigh). 기본은 `codex_reasoning_effort`(medium)이고, high-risk 조건(주로 backend·mutating을 codex가 구현/수정)일 때만 `codex_high_risk_effort`(high)로 승격합니다. config에서 두 값을 조정하며, 빈 문자열로 두면 주입을 생략합니다(`~/.codex/config.toml` 기본값 사용).
 
 ## MCP 도구 (선택)
 
