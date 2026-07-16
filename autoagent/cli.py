@@ -11,7 +11,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from autoagent.artifacts import DEFAULT_CONFIG, make_run_dir, read_text, write_metadata, write_text
+from autoagent.artifacts import DEFAULT_CONFIG, ensure_project_config, make_run_dir, read_text, write_metadata, write_text
 from autoagent.config import load_config
 from autoagent.workflows.decompose import run_decompose_workflow
 from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
@@ -105,6 +105,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
+    if args.project:
+        # --project가 요구하는 config를 미리 보장한다. workspace는 --workspace(abs) 우선, 없으면 cwd.
+        ws = Path(args.workspace).resolve() if args.workspace else Path.cwd()
+        ensure_project_config(Path(args.config).parent, args.project, ws)
     config = load_config(Path(args.config), project=args.project)
     from autoagent.roles import load_roles, validate_roles
     validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent, config.tiers)

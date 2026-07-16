@@ -84,6 +84,24 @@ def validate_project_name(project: str) -> None:
         raise SystemExit(f"Invalid project name: {project!r}")
 
 
+def ensure_project_config(config_dir: Path, project: str, workspace: Path) -> Path:
+    """projects/<project>/config.json이 없으면 workspace만 채워 생성한다(있으면 무동작).
+
+    반환은 config 경로. 이름은 validate_project_name으로 검증한다(경로 이탈 방지).
+    생성 시 안내를 출력한다. projects/*/config.json은 gitignored라 커밋되지 않는다.
+    """
+    validate_project_name(project)
+    cfg = config_dir / "projects" / project / "config.json"
+    if not cfg.exists():
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text(
+            json.dumps({"workspace": str(workspace)}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[project] 새 프로젝트 config 생성: {cfg} (workspace={workspace})")
+    return cfg
+
+
 def make_run_dir(project: str | None = None) -> Path:
     """runs 폴더를 만든다. project가 있으면 projects/<name>/runs 아래, 없으면 기존 ROOT/runs 아래."""
     if project is not None:
