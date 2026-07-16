@@ -16,17 +16,23 @@ Raw arguments: `$ARGUMENTS`
 - Otherwise: TYPE = `auto`, REQUEST = the whole of `$ARGUMENTS`.
 - Budget N = `5` if TYPE is `docs` or `review`, else `9`.
 - If REQUEST is empty, stop and ask the user what they want done.
+- PROJECT = 현재 작업 디렉터리의 basename(예: `.../LanguageDetection` → `LanguageDetection`).
+  이 이름으로 런을 `projects/<PROJECT>/`에 격리한다. config가 없으면 하네스가 현재 workspace로
+  자동 생성한다.
 
 ## 2. Phase 1 — run the routed workflow
 
 Run (do NOT add `--require-human-approval`; the harness gates high-risk/db itself):
 
 ```
-python "C:\Users\systran\Desktop\AutoAgent\run.py" --workflow routed --task-type TYPE --max-review-rounds 1 --max-agent-calls N --workspace . --request "REQUEST"
+python "C:\Users\systran\Desktop\AutoAgent\run.py" --workflow routed --task-type TYPE --max-review-rounds 1 --max-agent-calls N --project "PROJECT" --workspace . --request "REQUEST"
 ```
 
-Substitute TYPE, N, REQUEST. From the output, capture the run directory from the
+Substitute TYPE, N, PROJECT, REQUEST. From the output, capture the run directory from the
 `RUN_DIR:` line. If there is no `RUN_DIR:` line, summarize stderr + exit code and stop.
+
+`--project "PROJECT"`로 런이 `projects/PROJECT/runs/<stamp>`에 격리된다. `RUN_DIR:`와
+`resume_command`는 하네스가 절대경로로 출력·임베드하므로 아래 섹션 로직은 그대로 동작한다.
 
 ## 3. Branch on the outcome
 
