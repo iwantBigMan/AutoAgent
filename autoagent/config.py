@@ -14,6 +14,15 @@ from typing import Any
 from autoagent.artifacts import validate_project_name
 
 
+def _effort_default(value: str | None, default: str) -> str:
+    """None(키 누락/null)이면 기본값을, 명시적 ""(주입 생략 opt-out)는 그대로 보존한다.
+
+    다른 설정은 `raw.get(k) or default` 관용구를 쓰지만 codex effort만은 빈 문자열이
+    "주입하지 않음"이라는 의미를 갖기 때문에 falsy 폴백을 쓰지 않는다.
+    """
+    return default if value is None else value
+
+
 @dataclass
 class Config:
     """하네스 전역 설정 값 묶음(모델/effort/샌드박스/타임아웃/예산 기본값 등)."""
@@ -30,10 +39,19 @@ class Config:
     claude_high_risk_effort: str
     claude_impl_permission: str
     codex_model: str
+    # codex 기본 추론 강도(medium). high-risk가 아니면 이 값을 CLI에 주입한다.
     codex_reasoning_effort: str
+    # high-risk 조건을 만족할 때만 승격하는 codex 추론 강도(high).
+    codex_high_risk_effort: str
     default_max_agent_calls_review: int
     default_max_agent_calls_implementation: int
     max_parallel_lanes: int = 2
+    # 1단계 검증 스테이지(구현/수정 뒤 DB-free 실행 검증). 기본 활성.
+    verification_enabled: bool = True
+    # 실행할 검증 커맨드 목록(allowlist). 비어 있으면 verification.default_commands로 채운다.
+    # 각 항목: {"name": str, "command": [str, ...], "cwd": 선택(workspace 상대)}.
+    verification_commands: list[dict[str, Any]] = field(default_factory=list)
+    verification_timeout_seconds: int = 1800
     # Claude 서브프로세스에 주입할 MCP 툴 allowlist(예: ["mcp__serena", "mcp__context7"]).
     # 비어 있으면(기본) --allowedTools를 붙이지 않아 기존 명령과 바이트 동일하다(opt-in).
     mcp_allowed_tools: list[str] = field(default_factory=list)
@@ -89,11 +107,17 @@ def load_config(path: Path, project: str | None = None) -> Config:
         #   "acceptEdits"      = 파일 편집만 자동, bash/네트워크는 차단(안전 기본값).
         #   "bypassPermissions"= --dangerously-skip-permissions, 명령·네트워크까지 자율(opt-in, 무샌드박스).
         claude_impl_permission=raw.get("claude_impl_permission") or "acceptEdits",
-        codex_model=raw.get("codex_model") or "gpt-5.5",
-        codex_reasoning_effort=raw.get("codex_reasoning_effort") or "high",
+        codex_model=raw.get("codex_model") or "gpt-5.6-sol",
+        # codex effort는 `codex -c model_reasoning_effort=...`로 실제 주입한다(minimal/low/
+        # medium/high/xhigh). 기본 medium, high-risk 구현/수정 때만 high로 승격.
+        codex_reasoning_effort=_effort_default(raw.get("codex_reasoning_effort"), "medium"),
+        codex_high_risk_effort=_effort_default(raw.get("codex_high_risk_effort"), "high"),
         default_max_agent_calls_review=int(raw.get("default_max_agent_calls_review") or 5),
         default_max_agent_calls_implementation=int(raw.get("default_max_agent_calls_implementation") or 9),
         max_parallel_lanes=int(raw.get("max_parallel_lanes") or 2),
         mcp_allowed_tools=list(raw.get("mcp_allowed_tools") or []),
         mcp_servers=dict(raw.get("mcp_servers") or {}),
+        verification_enabled=bool(raw.get("verification_enabled", True)),
+        verification_commands=list(raw.get("verification_commands") or []),
+        verification_timeout_seconds=int(raw.get("verification_timeout_seconds") or 1800),
     )

@@ -98,14 +98,31 @@ def claude_command(
     return command
 
 
-def codex_exec_command(config: Config, codex: str, sandbox: str, model: str | None = None) -> list[str]:
-    """`codex exec ...` 명령 리스트를 조립한다(승인 정책·모델·샌드박스·작업공간 포함)."""
-    command = [
-        codex,
-        "--ask-for-approval",
-        config.codex_approval,
-        "exec",
-    ]
+def codex_exec_command(
+    config: Config,
+    codex: str,
+    sandbox: str,
+    model: str | None = None,
+    effort: str | None = None,
+) -> list[str]:
+    """`codex exec ...` 명령 리스트를 조립한다(승인 정책·모델·추론강도·샌드박스·작업공간 포함).
+
+    effort가 None이면 config.codex_reasoning_effort(기본 medium)로 폴백한다. 값은
+    `-c model_reasoning_effort="..."` 전역 오버라이드로 exec 앞에 붙인다(값은 TOML이라
+    따옴표로 감싼다). effort가 빈 문자열이면 주입을 생략한다(opt-out).
+    """
+    command = [codex]
+    selected_effort = config.codex_reasoning_effort if effort is None else effort
+    if selected_effort:
+        # -c는 서브커맨드(exec) 앞에 오는 전역 플래그. TOML 문자열이라 값에 따옴표를 포함시킨다.
+        command.extend(["-c", f'model_reasoning_effort="{selected_effort}"'])
+    command.extend(
+        [
+            "--ask-for-approval",
+            config.codex_approval,
+            "exec",
+        ]
+    )
     selected_model = model or config.codex_model
     if selected_model:
         command.extend(["-m", selected_model])
