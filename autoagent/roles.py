@@ -44,7 +44,11 @@ def load_roles(config_dir: Path) -> dict[str, dict[str, Any]]:
     return roles
 
 
-def validate_roles(roles: dict[str, Any], config_dir: Path) -> None:
+def validate_roles(
+    roles: dict[str, Any],
+    config_dir: Path,
+    tiers: dict[str, dict[str, dict[str, Any]]],
+) -> None:
     """시작 시 레지스트리 정합성 검사. 문제가 있으면 즉시 종료한다."""
     required = {"context", "architect", "validation", "implementer", "reviewer",
                 "fix", "final-review", "evaluation", "report"}
@@ -57,6 +61,16 @@ def validate_roles(roles: dict[str, Any], config_dir: Path) -> None:
             raise SystemExit(f"역할 {rid}: high_risk_condition 값 오류 {r.get('high_risk_condition')!r}")
         if r.get("agent") not in {"claude", "codex", "route"}:
             raise SystemExit(f"역할 {rid}: agent 값 오류 {r.get('agent')!r}")
+        # 티어 참조 정합성: 역할이 참조하는 tier/high_risk_tier가 가능한 agent 팔레트에 있어야 한다.
+        agents = ["claude", "codex"] if r.get("agent") == "route" else [r.get("agent")]
+        names = [r.get("tier")] + ([r["high_risk_tier"]] if r.get("high_risk_tier") else [])
+        for ag in agents:
+            for tname in names:
+                if tname not in tiers.get(ag, {}):
+                    raise SystemExit(f"역할 {rid}: 티어 '{tname}'가 agent '{ag}' 팔레트에 없음")
+        # high_risk_condition이 있는데 high_risk_tier가 없으면 경고(동작은 tier로 폴백).
+        if r.get("high_risk_condition") not in (None, "none") and not r.get("high_risk_tier"):
+            print(f"[roles] 경고: 역할 {rid}는 high_risk_condition이 있으나 high_risk_tier가 없어 tier로 폴백")
 
 
 def _is_high_risk(route: dict[str, Any], request: str) -> bool:
@@ -90,24 +104,12 @@ def resolve_role(
     else:
         escalate = False
 
-    # 모델.
-    if agent == "codex":
-        model: str | None = config.codex_model
-    elif agent == "claude":
-        model = config.claude_high_risk_model if escalate else config.claude_model
-    else:
-        model = None
-
-    # effort.
-    effort_spec = entry["effort"]
-    if agent == "codex":
-        # codex는 역할 effort_spec(claude 전용 티어링)과 무관하게 항상 config 값을 주입한다.
-        # high-risk 승격 조건을 만족하면(주로 route→codex 구현/수정) high, 아니면 medium.
-        effort: str | None = config.codex_high_risk_effort if escalate else config.codex_reasoning_effort
-    elif agent == "claude" and effort_spec != "none":  # "standard" | "tiered"
-        effort = config.claude_high_risk_effort if escalate else config.claude_effort
-    else:
-        effort = None
+    # 모델·effort — 팔레트 티어 조회로 결정한다. escalate면 high_risk_tier(있을 때), 아니면 tier.
+    # agent는 이미 해석된 claude/codex라 route 역할도 agent별로 자동 해결된다.
+    tier_name = entry["high_risk_tier"] if (escalate and entry.get("high_risk_tier")) else entry["tier"]
+    tier = config.tiers[agent][tier_name]
+    model: str | None = tier.get("model")
+    effort: str | None = tier.get("effort")
 
     # 권한/샌드박스 — 병합된 command_for_agent(config-gated posture)와 동일하게 재현.
     permission_mode = None
