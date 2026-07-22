@@ -25,6 +25,8 @@ PROMPT_ALIASES = {
     "claude_context.md": "routed/context/claude_context.md",
     "claude_architect.md": "routed/context/claude_architect.md",
     "codex_validation.md": "routed/context/codex_validation.md",
+    "claude_review_route.md": "routed/review/claude_review.md",
+    "codex_review_route.md": "routed/review/codex_review.md",
     "claude_backend_impl.md": "routed/backend/claude_impl.md",
     "codex_backend_impl.md": "routed/backend/codex_impl.md",
     "claude_backend_review.md": "routed/backend/claude_review.md",
