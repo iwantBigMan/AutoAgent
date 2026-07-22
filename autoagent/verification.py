@@ -169,3 +169,33 @@ def run_verification(
     write_text(run_dir / f"{name}.md", summary_md)
     write_json(run_dir / f"{name}.json", {"overall_ok": overall_ok, "results": results})
     return summary_md, overall_ok
+
+
+def run_verification_or_skip(
+    *, run_dir: Path, config: Any, name: str = "04b_verification"
+) -> tuple[str, bool]:
+    """config.verification_commands가 있으면 실행, 없으면 명시적 스킵 요약을 남긴다.
+
+    미설정 프로젝트를 LD 하드코딩(default_commands)으로 폴백하지 않는다. 대신 '검증
+    커맨드 미설정(실행 근거 없음)'을 기록해, 리뷰/평가 프롬프트가 근거 부재를 알게 한다.
+    (요약 markdown, overall_ok)를 반환한다.
+    """
+    # 미설정: 조용히 스킵하되 그 사실을 산출물로 남긴다(정직한 스킵 > 남의 경로로 실패).
+    if not config.verification_commands:
+        summary = (
+            "# 자동 검증 결과 (하네스 1단계, DB-free)\n\n"
+            "**overall: SKIPPED**\n\n"
+            "이 프로젝트는 verification_commands가 미설정이라 검증을 실행하지 않았습니다"
+            "(실행 근거 없음). projects/<name>/config.json에 커맨드를 추가하면 활성화됩니다.\n"
+        )
+        write_text(run_dir / f"{name}.md", summary)
+        write_json(run_dir / f"{name}.json", {"overall_ok": True, "skipped": True, "results": []})
+        return summary, True
+    # 설정됨: 기존 실행기에 위임(폴백 없이 config 값만 사용).
+    return run_verification(
+        run_dir=run_dir,
+        workspace=config.workspace,
+        commands=config.verification_commands,
+        timeout_seconds=config.verification_timeout_seconds,
+        name=name,
+    )

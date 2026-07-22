@@ -15,7 +15,7 @@ from autoagent.config import Config
 from autoagent.roles import ResolvedRole, load_roles, resolve_role
 from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
 from autoagent.safety import review_needs_changes
-from autoagent.verification import default_commands, run_verification
+from autoagent.verification import run_verification_or_skip
 from autoagent.workflows.routed_common import run_evaluation, run_final_report, stop_after
 
 
@@ -204,13 +204,8 @@ def _maybe_run_verification(args: Namespace, config: Config, run_dir: Path, impl
     """
     if args.dry_run or getattr(args, "skip_verification", False) or not config.verification_enabled:
         return implementation
-    commands = config.verification_commands or default_commands(config.workspace)
-    summary, ok = run_verification(
-        run_dir=run_dir,
-        workspace=config.workspace,
-        commands=commands,
-        timeout_seconds=config.verification_timeout_seconds,
-    )
+    # 미설정이면 default_commands로 폴백하지 않고 스킵(Q3-A). LD는 자기 config로 커맨드를 갖는다.
+    summary, ok = run_verification_or_skip(run_dir=run_dir, config=config)
     print(f"Verification stage: {'PASS' if ok else 'FAIL'} ({run_dir})")
     return f"{implementation}\n\n---\n{summary}"
 
