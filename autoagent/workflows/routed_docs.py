@@ -22,6 +22,16 @@ def run_docs_route(
     budget: AgentCallBudget,
     run_dir: Path,
 ) -> int:
+    # review 라우트는 실제 리뷰(02)와 검증 요약을 평가/보고에 넘긴다. docs(문서)는 기존 문자열 유지.
+    if common.get("TASK_TYPE") == "review":
+        impl_arg = "No implementation step was run (read-only review route)."
+        review_arg = common.get("CLAUDE_ARCHITECTURE") or "No review produced."
+        final_review_arg = common.get("VERIFICATION_SUMMARY") or "No verification stage was run."
+    else:
+        impl_arg = "No implementation step was run."
+        review_arg = "Read-only or docs/review route."
+        final_review_arg = "No final code review step was run."
+
     evaluation = run_evaluation(
         args,
         config,
@@ -29,10 +39,10 @@ def run_docs_route(
         budget,
         run_dir,
         name="04_codex_evaluation",
-        implementation="No implementation step was run.",
-        review="Read-only or docs/review route.",
+        implementation=impl_arg,
+        review=review_arg,
         fix="No fix step was run.",
-        final_review="No final code review step was run.",
+        final_review=final_review_arg,
     )
     if stop_after(args, run_dir, "evaluation"):
         return 0
@@ -43,10 +53,10 @@ def run_docs_route(
         budget,
         run_dir,
         name="05_claude_final_report",
-        implementation="No implementation step was run.",
-        review="Read-only or docs/review route.",
+        implementation=impl_arg,
+        review=review_arg,
         fix="No fix step was run.",
-        final_review="No final code review step was run.",
+        final_review=final_review_arg,
         evaluation=evaluation,
     )
     write_text(run_dir / "final_report.md", final)
