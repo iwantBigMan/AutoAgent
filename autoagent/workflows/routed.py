@@ -41,7 +41,9 @@ def run_routed_workflow(args: Namespace, config: Config, request: str, run_dir: 
     }
 
     try:
-        context, architecture, validation, stopped = run_preamble(args, config, base_values, route, budget, run_dir)
+        context, architecture, validation, verification_summary, stopped = run_preamble(
+            args, config, base_values, route, budget, run_dir
+        )
         if stopped:
             return 0
 
@@ -50,6 +52,7 @@ def run_routed_workflow(args: Namespace, config: Config, request: str, run_dir: 
             "CLAUDE_CONTEXT": context,
             "CLAUDE_ARCHITECTURE": architecture,
             "CODEX_VALIDATION": validation,
+            "VERIFICATION_SUMMARY": verification_summary,
         }
 
         if args.read_only or route["task_type"] in {"docs", "review"}:
