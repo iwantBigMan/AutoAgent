@@ -41,6 +41,7 @@ PROMPT_ALIASES = {
     "codex_frontend_fix.md": "routed/frontend/codex_fix.md",
     "claude_final.md": "routed/final/claude_final.md",
     "codex_final.md": "routed/final/codex_final.md",
+    "claude_final_review.md": "routed/final/claude_final_review.md",
     "codex_evaluator.md": "routed/final/codex_evaluator.md",
 }
 

@@ -436,7 +436,7 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
             print(f"Task graph run stopped without integration: {run_dir}")
             return 0
 
-        # 통합 트리에 대해 run 레벨 1회: 최종리뷰(codex 07) → 평가(codex 08) → 최종보고(claude 09).
+        # 통합 트리에 대해 run 레벨 1회: 최종리뷰(구현자 반대편, 07) → 평가(codex 08) → 최종보고(claude 09).
         integ_wt = run_dir / "worktrees" / "_integration"
         integ_config = dataclasses.replace(config, workspace=integ_wt)
         run_route = route_task("backend", task_graph.get("goal", ""), "auto")

@@ -57,7 +57,7 @@ Read `<RUN_DIR>/approval_status.json` if it exists.
 ## 4. Report
 
 Read and summarize whichever of these exist in `<RUN_DIR>`: `04_*_impl*`,
-`05_*_review*`, `06_*_fix*`, `07_codex_final_review*`, `08_codex_evaluation*`,
+`05_*_review*`, `06_*_fix*`, `07_*_final_review*`, `08_codex_evaluation*`,
 `09_claude_final_report*`, `final_report.md`, `final_evaluation.md`.
 
 Then run `git -C . diff --stat` to show what changed in the project.
