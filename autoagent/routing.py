@@ -42,29 +42,6 @@ HIGH_RISK_TERMS = [
     "backfill",
     "rollback",
 ]
-CODEX_IMPLEMENTER_TERMS = [
-    "test failure",
-    "test failed",
-    "pytest",
-    "failing test",
-    "lint",
-    "type error",
-    "typecheck",
-    "build error",
-    "build failed",
-    "diff",
-    "patch",
-    "error log",
-    "stack trace",
-    "traceback",
-    "fix the failing",
-    "run tests",
-    "테스트 실패",
-    "테스트 돌려",
-    "에러 로그",
-    "빌드 에러",
-    "수정해줘",
-]
 # auto 라우팅의 "구현 의도" 감지용 동사 목록.
 # 명사 점수가 docs를 가리켜도 아래 구현 의도가 있으면 backend/frontend로 되돌린다.
 # 한국어는 조사가 붙어도 안전한 부분일치(substring) 매칭.
@@ -239,8 +216,6 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
     implementation_agent, review_agent, implementer_reason = choose_implementer(
         requested_implementer=requested_implementer,
         task_type=chosen,
-        subtype=subtype,
-        request=request,
     )
 
     return {
@@ -262,36 +237,20 @@ def choose_implementer(
     *,
     requested_implementer: str,
     task_type: str,
-    subtype: str,
-    request: str,
 ) -> tuple[str, str, str]:
     """(구현자, 리뷰어, 사유)를 반환. 리뷰어는 항상 구현자와 반대 모델이다.
 
-    명시 지정이 우선. auto면 frontend=codex, backend=claude 기본이며,
-    db가 아닌 backend에서 test/build/diff-fix 성격이면 codex로 넘긴다.
+    명시 지정이 우선. auto면 모든 구현(backend·frontend)은 Codex가 맡고 리뷰는 반대편
+    Claude가 맡는다. docs/review 라우트는 구현 스텝이 없어 claude를 구현자 자리에 둔다.
     """
     if requested_implementer == "claude":
         return "claude", "codex", "Implementer explicitly set to Claude."
     if requested_implementer == "codex":
         return "codex", "claude", "Implementer explicitly set to Codex."
 
-    if task_type == "frontend":
-        return "codex", "claude", "Frontend defaults to Codex implementation."
+    if task_type in {"backend", "frontend"}:
+        return "codex", "claude", f"{task_type.capitalize()} implementation defaults to Codex."
     if task_type in {"docs", "review"}:
         return "claude", "codex", "Docs/review routes have no implementation step."
-    if task_type == "backend":
-        lowered = request.lower()
-        matched = [term for term in CODEX_IMPLEMENTER_TERMS if term in lowered]
-        if subtype != "db" and matched:
-            return (
-                "codex",
-                "claude",
-                f"Backend request is test/build/diff-fix oriented; matched {len(matched)} keyword(s).",
-            )
-        return (
-            "claude",
-            "codex",
-            "Backend defaults to Claude unless the request is test/build/diff-fix oriented.",
-        )
 
     return "claude", "codex", "Fallback implementer selection."

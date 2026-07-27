@@ -117,7 +117,7 @@ run.py → cli.py
                 review → 05_..._review_r{r}.md
                 review_needs_changes()?  아니오 → break
                 fix    → 06_..._fix_r{r}.md
-            final-review → 07_codex_final_review.md
+            final-review → 07_{리뷰어}_final_review.md (구현자 반대편)
             evaluation  → 08_codex_evaluation.md   (routed_common.run_evaluation)
             report      → 09_claude_final_report.md (routed_common.run_final_report)
 ```
@@ -224,7 +224,7 @@ run.py → cli.py
 | `approval_status.json` / `approval_required.md` / `checkpoint.json` | 승인 게이트 상태·재개 정보 |
 | `04_{agent}_{task}_impl.md` | 구현 결과 |
 | `05_..._review_r{r}.md` / `06_..._fix_r{r}.md` | 리뷰 / 수정(라운드별) |
-| `07_codex_final_review.md` | 최종 감사(Codex 고정) |
+| `07_{리뷰어}_final_review.md` | 최종 감사(구현자 반대편; codex 구현이면 claude) |
 | `08_codex_evaluation.md` / `09_claude_final_report.md` | 평가 / 최종 보고 |
 | `{name}_prompt.md` / `{name}_command.json` / `{name}_stdout.md` / `..._stderr.txt` | 단계별 입력·명령·출력 |
 | `task_graph.json` (decompose) / `integration_report.md` | 분해 그래프 / 통합 결과 |

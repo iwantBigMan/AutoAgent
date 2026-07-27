@@ -1,8 +1,8 @@
 """routed 구현 라우트.
 
 구현(04) -> 리뷰-수정 반복(05/06, max_review_rounds, 통과 시 조기 종료) ->
-최종리뷰(07) -> 평가(08) -> 최종보고(09). 리뷰어는 항상 구현자와 반대 모델이고,
-high-risk backend를 claude(opus)로 구현/수정할 때는 effort xhigh를 쓴다.
+최종리뷰(07) -> 평가(08) -> 최종보고(09). 리뷰어는 항상 구현자와 반대 모델이고(07 최종리뷰 포함),
+high-risk backend 구현/수정은 codex의 deep 티어(effort high)로 수행한다.
 """
 from __future__ import annotations
 
@@ -222,32 +222,40 @@ def run_final_review(
     implementation: str,
     review: str,
     fix: str,
-    name: str = "07_codex_final_review",
+    name: str | None = None,
 ) -> str:
-    """codex 최종리뷰(07). dry-run이면 프롬프트/커맨드만 렌더하고 [dry-run] 문자열 반환.
+    """최종리뷰(07). 리뷰어는 구현자의 반대 모델(route["review_agent"])이다.
 
-    routed_impl의 기존 07 로직을 그대로 옮긴 것으로, routed와 실행기가 공유한다.
-    바이트 패리티: name 기본값·프롬프트 값·resolve_role 인자가 원본과 동일해야 한다.
+    codex 구현이면 claude가, claude 구현이면 codex가 최종리뷰를 맡는다. 산출 파일명도
+    05/06처럼 에이전트를 반영한다. dry-run이면 프롬프트/커맨드만 렌더하고 [dry-run]
+    문자열을 반환한다. routed_impl과 decompose 실행기(task_exec)가 공유한다.
     """
+    # 리뷰어 = 구현자 반대편. 파일명은 05_{review_agent}/06_{impl}과 일관되게 review_agent 반영.
+    review_agent = route["review_agent"]
+    if name is None:
+        name = f"07_{review_agent}_final_review"
     # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
-    # 그대로 쓴다(현행 버그를 의도적으로 보존 — 수정은 별도 계획에서 다룬다).
+    # 그대로 쓴다(codex가 리뷰어일 때만 의미; 현행 동작 보존). claude 리뷰어면 mutating=false라
+    # resolve_role이 permission_mode=plan을 부여한다.
     roles = load_roles(DEFAULT_CONFIG.parent)
     final_review_role = resolve_role(
-        roles["final-review"], config=config, route=route, request=request, agent="codex", read_only=args.read_only
+        roles["final-review"], config=config, route=route, request=request, agent=review_agent, read_only=args.read_only
     )
+    # claude 리뷰어면 대칭 프롬프트(claude_final_review.md)를, codex면 기존 codex_final.md를 쓴다.
+    prompt_name = "claude_final_review.md" if review_agent == "claude" else "codex_final.md"
     final_review_prompt = render_template(
-        "codex_final.md",
+        prompt_name,
         {**common, "IMPLEMENTATION_RESULT": implementation, "REVIEW_RESULT": review, "FIX_RESULT": fix},
     )
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", final_review_prompt)
         write_command_artifact(run_dir, name, command_for_agent(config, final_review_role))
-        return "[dry-run: Codex final review output]"
-    codex = require_command(config.codex_command)
+        return f"[dry-run: {review_agent} final review output]"
+    command_name = require_command(config.claude_command if review_agent == "claude" else config.codex_command)
     budget.before_call(next_step="final-review", out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
-        command=command_for_agent(config, final_review_role, resolved_command=codex),
+        command=command_for_agent(config, final_review_role, resolved_command=command_name),
         prompt=final_review_prompt,
         cwd=config.workspace,
         out_dir=run_dir,

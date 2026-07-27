@@ -323,7 +323,7 @@ projects/&lt;name&gt;/        프로젝트별 config.json + runs/ (재사용 레
       <div class="stage x">
         <div class="rail"><div class="node"></div><div class="bar"></div></div>
         <div class="sbody"><div class="sbox">
-          <div class="st-h"><span class="badge b-x">Codex</span><span class="name">final-review</span><span class="art">07_codex_final_review.md</span></div>
+          <div class="st-h"><span class="badge b-c">Claude</span><span class="name">final-review</span><span class="art">07_claude_final_review.md (구현자 반대편)</span></div>
           <div class="desc">최종 반영본에 대한 마무리 리뷰.</div>
         </div></div>
       </div>
@@ -385,7 +385,7 @@ projects/&lt;name&gt;/        프로젝트별 config.json + runs/ (재사용 레
           <tr><td><b>implementer</b></td><td><span class="badge b-r">route</span></td><td>tiered</td><td>backend_high_risk_mutating</td><td><span class="badge b-mut">쓰기</span></td><td>write</td></tr>
           <tr><td><b>reviewer</b></td><td><span class="badge b-r">route</span></td><td>standard</td><td>none</td><td><span class="badge b-ro">읽기</span></td><td>plan</td></tr>
           <tr><td><b>fix</b></td><td><span class="badge b-r">route</span></td><td>tiered</td><td>backend_high_risk_mutating</td><td><span class="badge b-mut">쓰기</span></td><td>write</td></tr>
-          <tr><td><b>final-review</b></td><td><span class="badge b-x">codex</span></td><td>standard</td><td>none</td><td><span class="badge b-ro">읽기</span></td><td>configured</td></tr>
+          <tr><td><b>final-review</b></td><td><span class="badge b-c">claude</span> (구현자 반대편)</td><td>standard</td><td>none</td><td><span class="badge b-ro">읽기</span></td><td>configured</td></tr>
           <tr><td><b>evaluation</b></td><td><span class="badge b-x">codex</span></td><td>standard</td><td>none</td><td><span class="badge b-ro">읽기</span></td><td>from_read_only</td></tr>
           <tr><td><b>report</b></td><td><span class="badge b-c">claude</span></td><td>standard</td><td>none</td><td><span class="badge b-ro">읽기</span></td><td>plan</td></tr>
         </tbody>
@@ -449,9 +449,8 @@ is_high_risk      = risk_level=="high" <span class="k">or</span> subtype=="db" <
         <tbody>
           <tr><td><code>--implementer claude</code></td><td><span class="badge b-c">claude</span></td><td><span class="badge b-x">codex</span></td></tr>
           <tr><td><code>--implementer codex</code></td><td><span class="badge b-x">codex</span></td><td><span class="badge b-c">claude</span></td></tr>
+          <tr><td>auto · backend</td><td><span class="badge b-x">codex</span></td><td><span class="badge b-c">claude</span></td></tr>
           <tr><td>auto · frontend</td><td><span class="badge b-x">codex</span></td><td><span class="badge b-c">claude</span></td></tr>
-          <tr><td>auto · backend (일반)</td><td><span class="badge b-c">claude</span></td><td><span class="badge b-x">codex</span></td></tr>
-          <tr><td>auto · backend + test/build/lint/diff-fix</td><td><span class="badge b-x">codex</span></td><td><span class="badge b-c">claude</span></td></tr>
           <tr><td>docs / review / read-only</td><td colspan="2" class="muted">구현 없음</td></tr>
         </tbody>
       </table>
