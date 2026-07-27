@@ -12,6 +12,7 @@ cross-model implement/review with human approval gates. Full reference: `README.
   `{VAR}` placeholders. **Code orchestrates; prompts carry the "what to do"** — change
   behavior in prompts, not by hardcoding Python.
 - Reviewer is always the **opposite model** of the implementer (`routing.choose_implementer`).
+- **역할 분업(고정)**: auto 라우팅에서 모든 구현(backend·frontend)은 **Codex**, 모든 리뷰(라운드 05 + 최종 07)는 반대편 **Claude**가 맡는다. 계획(context·architect)·최종보고는 Claude, 계획검증·평가(08)는 Codex. high-risk backend 구현은 codex `deep` 티어(effort high). Codex 구현자는 결과 전 자기 diff를 자체 리뷰(`SELF_REVIEW`)한다.
   Codex does **not** load Claude skills — keep shared agent behavior in `prompts/*.md`,
   the neutral channel both CLIs read via stdin.
 

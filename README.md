@@ -410,13 +410,13 @@ final_evaluation.md
 final_report.md
 ```
 
-리뷰-수정 반복 라운드는 `_rN` 접미사로 남습니다(예: `05_codex_backend_review_r1.md`). Backend 라우트는 다음도 생성할 수 있습니다:
+리뷰-수정 반복 라운드는 `_rN` 접미사로 남습니다(예: `05_claude_backend_review_r1.md`). Backend 라우트는 다음도 생성할 수 있습니다:
 
 ```text
-04_claude_backend_impl.md
-05_codex_backend_review_r1.md
-06_claude_backend_fix_r1.md
-07_codex_final_review.md
+04_codex_backend_impl.md
+05_claude_backend_review_r1.md
+06_codex_backend_fix_r1.md
+07_claude_final_review.md
 08_codex_evaluation.md
 ```
 
@@ -426,7 +426,7 @@ Frontend 라우트는 다음도 생성할 수 있습니다:
 04_codex_frontend_impl.md
 05_claude_frontend_review_r1.md
 06_codex_frontend_fix_r1.md
-07_codex_final_review.md
+07_claude_final_review.md
 08_codex_evaluation.md
 ```
 

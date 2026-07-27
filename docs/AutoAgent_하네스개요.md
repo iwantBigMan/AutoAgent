@@ -217,9 +217,8 @@ Claude hi effort: xhigh   ← high-risk(opus)에 주는 "ultracode급" 추론 �
 |------|--------|--------|
 | `--implementer claude` | claude | codex |
 | `--implementer codex` | codex | claude |
+| auto · backend | codex | claude |
 | auto · frontend | codex | claude |
-| auto · backend (일반) | claude | codex |
-| auto · backend + test/build/lint/diff-fix 성격 | codex | claude |
 | docs / review / read-only | (구현 없음) | — |
 
 ---
