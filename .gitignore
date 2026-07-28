@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .env
 autoagent.config.json
+.aa_mcp.json
 runs/*/
 !runs/.gitkeep
 roles.json
