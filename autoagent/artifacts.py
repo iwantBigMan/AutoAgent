@@ -43,6 +43,11 @@ PROMPT_ALIASES = {
     "codex_final.md": "routed/final/codex_final.md",
     "claude_final_review.md": "routed/final/claude_final_review.md",
     "codex_evaluator.md": "routed/final/codex_evaluator.md",
+    "seed_contract.md": "research/seed_contract.md",
+    "a_researcher.md": "research/a_researcher.md",
+    "crossmodel_verifier.md": "research/crossmodel_verifier.md",
+    "derive.md": "research/derive.md",
+    "final_html_report.md": "research/final_html_report.md",
 }
 
 
