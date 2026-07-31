@@ -63,3 +63,45 @@ def should_pause(trigger: GateTrigger | None, *, auto_approve_nonbranch: bool) -
     if trigger.forced:
         return True
     return not auto_approve_nonbranch
+
+
+def pause_at_gate(run_dir, trigger: GateTrigger, state: dict) -> int:
+    """게이트 도달 시 정지 산출물을 남기고 stdout 고정 라인을 찍는다(§6.2, 무인 deadlock 차단).
+
+    routed_common.block_for_human_approval의 규약을 리서치용으로 옮긴 것:
+    - gate_status.json: 기계판독 상태(status/gate_kind/forced/reason/resume_command).
+    - gate_required.md: 사람이 읽을 정지 사유 + 재개 명령.
+    - stdout 고정 라인: RESEARCH_STATUS/RUN_DIR/RESUME_COMMAND/GATE_KIND — 구동 측(사람/CLI)이
+      run_dir·재개 명령을 안정적으로 집도록 한다. resume_command는 routed와 동일 함수로 만든다.
+    """
+    from pathlib import Path
+
+    from autoagent.artifacts import write_json, write_text
+    from autoagent.workflows.routed_common import resume_command_for
+
+    run_dir = Path(run_dir)
+    resume_command = resume_command_for(run_dir)
+    status = {
+        "status": "waiting_for_human_approval", "approved": False, "required": True,
+        "gate_kind": trigger.kind, "forced": trigger.forced, "reason": trigger.reason,
+        "run_dir": str(run_dir), "resume_command": resume_command,
+        "state": {"outer_pass": state.get("outer_pass"), "stage": state.get("stage"),
+                  "inner_round": state.get("inner_round")},
+    }
+    write_json(run_dir / "gate_status.json", status)
+    write_text(
+        run_dir / "gate_required.md",
+        "# 리서치 게이트 — 인간 승인 필요\n\n"
+        f"게이트 종류: **{trigger.kind}** (forced={trigger.forced})\n\n"
+        f"사유: {trigger.reason}\n\n"
+        f"상태: outer_pass={state.get('outer_pass')}, stage={state.get('stage')}, "
+        f"inner_round={state.get('inner_round')}\n\n"
+        "검토 후 재개하려면(이 명령 실행 자체가 승인):\n\n"
+        f"```powershell\n{resume_command}\n```\n",
+    )
+    print("RESEARCH_STATUS: waiting_for_human_approval")
+    print(f"RUN_DIR: {run_dir}")
+    print(f"RESUME_COMMAND: {resume_command}")
+    print(f"GATE_KIND: {trigger.kind}")
+    print(f"Research run waiting for human approval ({trigger.kind}): {run_dir}")
+    return 0

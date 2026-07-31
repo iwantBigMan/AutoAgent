@@ -98,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-review", action="store_true", help="Skip final Claude review")
     parser.add_argument("--dry-run", action="store_true", help="Render prompts without calling CLIs")
     parser.add_argument(
+        "--auto-approve-nonbranch", action="store_true",
+        help="Research workflow: auto-pass non-branch gates (never skips forced high-cost/contradiction/blocked gates)",
+    )
+    parser.add_argument(
         "--resume",
         help="Resume a gated routed run from its run directory; loads checkpoint.json and continues into implementation",
     )
@@ -129,6 +133,8 @@ def main() -> int:
         run_dir = Path(args.resume)
         # 재개 run의 run_dir 밑에 Claude용 MCP config 생성(dry-run이면 경로만, 파일 미기록).
         config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
+        if (run_dir / "research_state.json").exists():
+            return run_research_workflow(args, config, None, run_dir)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
             return run_task_graph_execution(args, config, run_dir)
