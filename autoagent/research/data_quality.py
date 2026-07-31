@@ -13,10 +13,13 @@ tolerance는 metric kind별로 코드가 고정한다(합계·행수=정확일�
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from autoagent.data.csv_validator import CSVQualityMetrics, _read_csv_rows
 from autoagent.research.types import Finding
+
+if TYPE_CHECKING:
+    from autoagent.research.types import Verdict
 
 # verdict schema_version.
 CHECK_SET_VERSION = 1
@@ -256,3 +259,94 @@ def check_sanity(
                 fix_directive=f"'{col}'의 중복 키를 dedup하거나 유니크 가정을 수정하세요.",
             ))
     return checks, findings
+
+
+def run_data_quality(stage_out: dict[str, Any], run_dir: Path, *, verifier_agent: str) -> "Verdict":
+    """c 스테이지 data_quality 검증(코드 실측만, 모델 0회).
+
+    stage_out에서 cleaned_files/manifest/claims/schema를 읽어 4대 체크를 돌리고, 코드가
+    findings를 집계해 status를 재계산한다. 파일을 못 읽으면 blocked, 위반 있으면
+    needs_changes, 전부 통과면 pass. verdict raw를 c_data_quality.json으로 남긴다.
+    verifier_agent는 계약상 받되 여기선 'code' 고정(모델 미호출) — provenance에만 기록.
+    """
+    from autoagent.artifacts import write_json
+    from autoagent.data.csv_validator import _sha256_of_file, validate_csv
+    from autoagent.research.types import Verdict
+
+    all_findings: list[Finding] = []
+    checks: list[dict[str, Any]] = []
+    recompute_all: list[dict[str, Any]] = []
+    schema_diff_all: list[dict[str, Any]] = []
+    row_delta: dict[str, Any] = {}
+    provenance: dict[str, Any] = {"files_read": [], "verifier_agent": verifier_agent}
+    has_error = False
+
+    manifest = stage_out.get("transform_manifest") or {"steps": []}
+    schema_expectations = stage_out.get("schema_expectations") or {}
+    derived_claims = stage_out.get("derived_claims") or []
+
+    for entry in stage_out.get("cleaned_files") or []:
+        cleaned_path = Path(entry.get("path", ""))
+        source_path = Path(entry.get("source_dump_path", ""))
+        try:
+            source_metrics = validate_csv(source_path)
+            cleaned_metrics = validate_csv(cleaned_path)
+            provenance["files_read"].append(str(cleaned_path))
+            provenance["files_read"].append(str(source_path))
+            provenance.setdefault("hashes", {})[str(source_path)] = _sha256_of_file(source_path)
+            provenance["hashes"][str(cleaned_path)] = _sha256_of_file(cleaned_path)
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            has_error = True
+            checks.append({"name": "file_read", "status": "error", "file": str(cleaned_path),
+                           "detail": f"{type(exc).__name__}: {exc}"})
+            all_findings.append(Finding(
+                severity="critical", category="file_read_error",
+                detail=f"cannot read {cleaned_path} / {source_path}: {exc}",
+                fix_directive="입력 CSV 경로·인코딩을 확인하세요(조용한 skip 금지).",
+            ))
+            continue
+
+        delta, rc_findings = check_row_conservation(source_metrics, cleaned_metrics, manifest)
+        row_delta = delta
+        all_findings.extend(rc_findings)
+        checks.append({"name": "row_conservation", "status": "pass" if not rc_findings else "fail",
+                       "file": str(cleaned_path), "detail": str(delta)})
+
+        diff, sc_findings = check_schema(cleaned_metrics, schema_expectations)
+        schema_diff_all.extend(diff)
+        all_findings.extend(sc_findings)
+        checks.append({"name": "schema", "status": "pass" if not sc_findings else "fail", "file": str(cleaned_path)})
+
+        sanity_rules = stage_out.get("sanity_rules") or {}
+        if sanity_rules:
+            sanity_checks, sn_findings = check_sanity(cleaned_metrics, sanity_rules)
+            checks.extend(sanity_checks)
+            all_findings.extend(sn_findings)
+        else:
+            checks.append({"name": "sanity", "status": "skipped", "detail": "no sanity_rules"})
+
+        rc_list, cl_findings = check_claims(source_path, derived_claims)
+        recompute_all.extend(rc_list)
+        all_findings.extend(cl_findings)
+        checks.append({"name": "claim_recompute", "status": "pass" if not cl_findings else "fail",
+                       "file": str(source_path)})
+
+    checks_ok = all(c["status"] in {"pass", "skipped"} for c in checks)
+    recompute_ok = all(r["match"] for r in recompute_all)
+    schema_ok = all(d["ok"] for d in schema_diff_all)
+    overall_ok = checks_ok and recompute_ok and schema_ok and not has_error
+
+    if has_error:
+        status: str = "blocked"
+    elif overall_ok:
+        status = "pass"
+    else:
+        status = "needs_changes"
+
+    raw = {
+        "schema_version": CHECK_SET_VERSION, "adapter": "data_quality", "stage_id": "c",
+        "overall_ok": overall_ok, "checks": checks, "recompute": recompute_all,
+        "row_delta": row_delta, "schema_diff": schema_diff_all, "provenance": provenance,
+    }
+    write_json(run_dir / "c_data_quality.json", raw)
+    return Verdict(status=status, adapter="data_quality", stage_id="c", findings=all_findings, raw=raw)
