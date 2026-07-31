@@ -28,11 +28,18 @@ from autoagent.artifacts import (
 from autoagent.config import Config
 from autoagent.research.adapters import verify
 from autoagent.research.convergence import decide_outer_pass, diff_verified_claims
+from autoagent.research.coverage import (
+    coverage_summary, render_coverage_matrix_html, render_warning_banner_html,
+)
+from autoagent.research.gates import evaluate_gate, pause_at_gate, should_pause
 from autoagent.research.html_report import render_report_html, write_desktop_report
 from autoagent.research.seed_contract import (
     build_seed_pin, detect_seed_violations, seed_pin_from_dict, seed_pin_to_dict,
 )
 from autoagent.research.snapshots import save_snapshot, write_sources_manifest
+from autoagent.research.state import (
+    is_stage_done, load_or_init_state, persist_state, pin_seed, resume_point, set_stage_status, STAGE_ORDER,
+)
 from autoagent.research.types import StageId, StageResult, Verdict
 from autoagent.roles import load_roles, resolve_role
 from autoagent.routing import choose_researcher
@@ -136,6 +143,12 @@ def _seed_fields(ctx: "ResearchContext") -> dict[str, str]:
     }
 
 
+def _prior_stage_summary(ctx: "ResearchContext") -> str:
+    """d 프롬프트용 선행 스테이지 요약(이미 resolved된 스테이지 산출물 발췌)."""
+    parts = [f"[{s}] {out[:800]}" for s, out in ctx.stage_outputs.items() if out]
+    return "\n\n".join(parts) if parts else "(선행 스테이지 요약 없음)"
+
+
 def _inject_verified_claims(verdict, researcher_out: str) -> None:
     """검증 통과 시 리서처 산출물의 claims(+seed_candidate)를 verdict.raw에 실제 주입한다.
 
@@ -192,8 +205,8 @@ def _run_stage_d_verify(ctx: "ResearchContext", researcher_out: str, stage: str,
     snaps = []
     for s in stage_out.get("sources", []):
         snaps.append(save_snapshot(
-            sources_dir, s.get("ref_id", "s?"), s.get("url", ""), s.get("fetched_text", ""),
-            http_status=int(s.get("http_status", 0)), fetch_ts=s.get("fetch_ts"),
+            sources_dir, s.get("ref_id") or "s?", s.get("url") or "", s.get("fetched_text") or "",
+            http_status=int(s.get("http_status") or 0), fetch_ts=s.get("fetch_ts"),
         ))
     write_sources_manifest(ctx.run_dir, snaps)
 
@@ -244,6 +257,8 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             "PRIOR_FEEDBACK": prior_feedback,
             "INNER_FEEDBACK": prior_feedback,   # b 프롬프트 명칭
             "DEEPEN_DELTA": prior_feedback,     # pass 2 심화 delta(피드백 없으면 빈 값)
+            "PRIOR_VERDICT_FEEDBACK": prior_feedback,       # d 프롬프트 명칭(CF-1)
+            "PRIOR_STAGE_SUMMARY": _prior_stage_summary(ctx),  # d 프롬프트 명칭(CF-1)
             "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", ""),
             # c 리서처(codex)용 CSV 경로. config에 있으면 그 값을, 없으면 워크스페이스 안내.
             "CSV_PATHS": getattr(ctx.config, "research_csv_paths", "") or "(워크스페이스의 입력 CSV)",
@@ -331,73 +346,131 @@ def _coverage_matrix_md(results: list[StageResult]) -> str:
     return banner + table
 
 
-def run_research_workflow(args: Namespace, config: Config, request: str, run_dir: Path) -> int:
-    """리서치 워크플로 진입점(최소경로 슬라이스).
+# 리포트 커버리지 표에 쓸 스테이지 한글 라벨.
+STAGE_LABELS = {"a": "회사 리서치", "b": "시장 분석", "c": "CSV 정제", "d": "팩트 리포트", "derive": "도출"}
+# 바깥 루프 상한(스펙 §1: 심화 2회). config에 값이 있으면 그것을 우선한다.
+DEFAULT_MAX_OUTER = 2
+DEFAULT_MIN_NEW_CLAIMS = 2
 
-    seed 확정 → 최소경로 스테이지(a, derive)를 안쪽 루프로 돌리고 → HTML 리포트를
-    바탕화면에 저장한다. dry-run이면 CLI 미호출로 프롬프트/커맨드/상태만 렌더한다.
+
+def run_research_workflow(args: Namespace, config: Config, request: str | None, run_dir: Path) -> int:
+    """리서치 워크플로 진입점(전체 파이프라인 + 바깥 루프 + 게이트 + 재개 + 커버리지).
+
+    seed 확정·pin → 바깥 pass 1..N(스테이지 a..derive를 안쪽 루프로) → 스테이지 경계·심화
+    진입 게이트 → 커버리지 매트릭스+배너를 상단에 박은 standalone HTML을 바탕화면에 저장한다.
+    request=None은 --resume 진입(저장된 seed/상태에서 복원). dry-run이면 CLI 미호출.
     """
     budget = AgentCallBudget(args.max_agent_calls)
+    state = load_or_init_state(run_dir)
+    max_outer = getattr(config, "research_max_outer", DEFAULT_MAX_OUTER)
+    min_new_claims = getattr(config, "research_min_new_claims", DEFAULT_MIN_NEW_CLAIMS)
+    auto_nonbranch = getattr(args, "auto_approve_nonbranch", False)
+
     ctx = ResearchContext(
-        args=args, config=config, request=request, run_dir=run_dir, budget=budget, seed_contract="",
+        args=args, config=config, request=request or "", run_dir=run_dir, budget=budget, seed_contract="",
+        state=state,
     )
-    ctx.state = {"outer_pass": 1, "stage": "seed", "inner_round": 0, "seed_pin": {},
-                 "verified_claims": [], "stage_status": {}}
-    _persist_state(ctx)
 
-    seed_out = _run_agent_step(
-        ctx, agent="claude", role_id="researcher", name="00_seed_contract",
-        prompt_name="seed_contract.md",
-        prompt_values={"REQUEST": request, "WORKSPACE": str(config.workspace)},
-        next_step="seed",
-        dry_output='SEED_CONTRACT_JSON\n```json\n{"company":"[dry-run]","base_currency":"KRW"}\n```\n',
-    )
-    ctx.seed_contract = seed_out
-    try:
-        ctx.state["seed_pin"] = extract_json_block(seed_out)
-    except Exception:  # noqa: BLE001 - dry-run/파싱 실패여도 최소경로는 진행
-        ctx.state["seed_pin"] = {}
-    _persist_state(ctx)
+    # preamble: seed 확정 후 read-only pin(재개면 기존 pin 재사용, seed 스텝 스킵).
+    if not state.get("seed_pin"):
+        seed_out = _run_agent_step(
+            ctx, agent="claude", role_id="researcher", name="00_seed_contract",
+            prompt_name="seed_contract.md",
+            prompt_values={"REQUEST": ctx.request, "WORKSPACE": str(config.workspace)},
+            next_step="seed",
+            dry_output='SEED_CONTRACT_JSON\n```json\n{"company":"[dry-run]","market":"[dry-run]",'
+                       '"base_currency":"KRW","period":"2021-2025","unit":"억원"}\n```\n',
+        )
+        ctx.seed_contract = seed_out
+        try:
+            pin_seed(run_dir, state, extract_json_block(seed_out))
+        except Exception:  # noqa: BLE001 - dry-run/파싱 실패여도 최소경로는 진행
+            pin_seed(run_dir, state, {"company": "[dry-run]", "market": "-",
+                                      "base_currency": "KRW", "period": "-", "unit": "-"})
+    else:
+        ctx.seed_contract = json.dumps(state["seed_pin"], ensure_ascii=False)
 
-    results: list[StageResult] = []
-    try:
-        for stage in MINIMAL_PATH:
-            result = run_stage_loop(stage, outer_pass=1, ctx=ctx)
-            results.append(result)
-            write_json(ctx.run_dir / f"stage_result_{stage}.json", {
-                "stage_id": result.stage_id, "status": result.status,
-                "output_path": result.output_path, "inner_rounds": result.inner_rounds,
-                "verdict_status": (result.verdict.status if result.verdict else None),
-            })
-    except Exception as exc:  # 예산 소진(AgentCallBudgetStopped 포함)은 부분 상태로 안전 종료.
-        from autoagent.runner import AgentCallBudgetStopped
-        if isinstance(exc, AgentCallBudgetStopped):
-            print(f"Research run stopped by budget before {exc.next_step}: {run_dir}")
-            return 0
-        raise
+    resume_outer, _resume_stage, _resume_inner = resume_point(state)
+    prev_claims: list[dict] = state.get("verified_claims", [])
 
-    body_md = render_template(
-        "final_html_report.md",
-        {
-            "COVERAGE_MATRIX_MD": _coverage_matrix_md(results),
-            "REQUEST": request,
-            "SEED_CONTRACT": ctx.seed_contract,
-            "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", "(없음)"),
-            "DERIVE_OUTPUT": ctx.stage_outputs.get("derive", "(없음)"),
-        },
-    )
+    # M3: 루프가 한 번도 안 돌아도(예: max_outer=0) 최종 리포트에서 항상 바인딩되도록 선초기화.
+    stage_results: list[StageResult] = []
+    for outer_pass in range(resume_outer, max_outer + 1):
+        state["outer_pass"] = outer_pass
+        persist_state(run_dir, state)
+
+        # 고비용 심화 진입 게이트(pass 2+, forced).
+        deepen_trigger = evaluate_gate(event="deepen_entry", outer_pass=outer_pass,
+                                       stage_results=[], contradiction=False, config=config)
+        if should_pause(deepen_trigger, auto_approve_nonbranch=auto_nonbranch):
+            return pause_at_gate(run_dir, deepen_trigger, state)
+
+        stage_results = []  # 이 pass의 스테이지 결과(위에서 선초기화한 변수를 pass마다 재설정)
+        for stage in STAGE_ORDER:
+            state["stage"] = stage
+            if is_stage_done(state, stage):
+                continue  # 재개 시 resolved 스테이지 건너뜀
+            result = run_stage_loop(stage, outer_pass, ctx)
+            stage_results.append(result)
+            set_stage_status(run_dir, state, stage, result.status)
+
+            # 스테이지 경계 게이트(blocked·exhausted 다수).
+            boundary = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
+                                     stage_results=stage_results, contradiction=False, config=config)
+            if should_pause(boundary, auto_approve_nonbranch=auto_nonbranch):
+                return pause_at_gate(run_dir, boundary, state)
+
+        # pass간 검증 claim 수집·delta·수렴/모순 판정.
+        curr_claims = collect_verified_claims(stage_results)
+        delta = diff_verified_claims(prev_claims, curr_claims)
+        seed_violations = []
+        if outer_pass > 1:
+            seed_violations = detect_seed_violations(
+                seed_pin_from_dict(state["seed_pin"]), _extract_seed_candidate(stage_results)
+            )
+        decision = decide_outer_pass(delta, seed_violations, outer_pass=outer_pass,
+                                     max_outer=max_outer, min_new_claims=min_new_claims)
+        state["verified_claims"] = prev_claims + delta.added
+        state["outer_decision"] = {"action": decision.action, "reason": decision.reason,
+                                   "contradictions": decision.contradictions}
+        persist_state(run_dir, state)
+
+        if decision.action == "gate":
+            # 모순/seed위반 = forced 게이트(절대 생략 안 함).
+            trigger = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
+                                    stage_results=stage_results, contradiction=True, config=config)
+            if trigger is not None:
+                return pause_at_gate(run_dir, trigger, state)
+        if decision.action in {"early_stop", "gate"}:
+            break
+        prev_claims = state["verified_claims"]
+
+    # 커버리지 매트릭스+배너를 상단에 박은 최종 리포트.
+    # M1 stage_status 키 규약 통일: set_stage_status(Task 25)가 평면 키(stage→status)로 쓰므로
+    # 리포트도 평면 키만 읽는다(outer 프리픽스 조회 제거 — run_outer_loop의 "{outer}:{stage}" 규약은
+    # 이 오케스트레이터에서 쓰지 않는다).
+    stage_status_for_report = {s: state["stage_status"].get(s, "missing") for s in STAGE_ORDER}
+    summary = coverage_summary(stage_status_for_report, STAGE_ORDER)
+    matrix_html = render_coverage_matrix_html(stage_status_for_report, STAGE_ORDER, stage_labels=STAGE_LABELS)
+    banner_html = render_warning_banner_html(summary)
+    body_md = render_template("final_html_report.md", {
+        "COVERAGE_BANNER": banner_html, "COVERAGE_MATRIX": matrix_html,
+        "COVERAGE_MATRIX_MD": _coverage_matrix_md(stage_results),  # M3: 루프 앞 선초기화라 항상 바인딩됨
+        "REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
+        "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", "(없음)"),
+        "DERIVE_OUTPUT": ctx.stage_outputs.get("derive", "(없음)"),
+    })
     html = render_report_html(title="리서치 리포트", body_md=body_md)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"research_report_{stamp}.html"
-    write_text(run_dir / "final_report.html", html)  # 감사추적용 사본(run_dir)
+    write_text(run_dir / "final_report.html", html)
     if args.dry_run:
         print(f"Research dry run written to {run_dir}")
         return 0
-    desktop_path = write_desktop_report(html, filename)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    desktop_path = write_desktop_report(html, f"research_report_{stamp}.html")
     try:
         import os
-        os.startfile(str(desktop_path))  # Windows: 기본 브라우저로 열기
-    except Exception:  # noqa: BLE001 - 오픈 실패해도 파일은 남았으므로 치명 아님
+        os.startfile(str(desktop_path))
+    except Exception:  # noqa: BLE001
         pass
     print(f"Research run complete: {run_dir}\nReport: {desktop_path}")
     return 0
