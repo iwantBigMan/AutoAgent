@@ -81,6 +81,9 @@ class Config:
     # 역할↔모델 매핑 팔레트: tiers[agent][tier명] = {"model": str, "effort": str | None}.
     # load_config가 기존 전역값에서 기본 팔레트를 합성하고 config의 "tiers"로 덮는다.
     tiers: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
+    # 크로스모델 검증기가 강제하는 최소 findings 쿼터(§4.1②). 미만이고 unchallenged_but_weak도
+    # 비었으면 코드가 needs_changes로 강등한다(무결 자유선언 방지).
+    crossmodel_min_findings: int = 3
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
