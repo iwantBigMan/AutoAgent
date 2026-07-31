@@ -39,8 +39,8 @@ from autoagent.runner import (
 
 # 이 슬라이스의 최소경로 스테이지 순서. b/c/d는 다음 슬라이스에서 채운다.
 MINIMAL_PATH: list[StageId] = ["a", "derive"]
-STAGE_ADAPTER = {"a": "crossmodel", "b": "crossmodel", "derive": "crossmodel"}
-STAGE_PROMPT = {"a": "a_researcher.md", "derive": "derive.md"}
+STAGE_ADAPTER = {"a": "crossmodel", "b": "crossmodel", "c": "data_quality", "derive": "crossmodel"}
+STAGE_PROMPT = {"a": "a_researcher.md", "c": "c_codex_research.md", "derive": "derive.md"}
 # 스테이지별 검증기 프롬프트. 기본은 crossmodel_verifier.md, b는 전용 프롬프트.
 # c(코드검증)·d(source_grounding)는 crossmodel 프롬프트를 쓰지 않으므로 매핑에서 제외한다.
 STAGE_VERIFIER_PROMPT = {"a": "crossmodel_verifier.md", "derive": "crossmodel_verifier.md"}

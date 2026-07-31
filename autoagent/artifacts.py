@@ -48,6 +48,7 @@ PROMPT_ALIASES = {
     "crossmodel_verifier.md": "research/crossmodel_verifier.md",
     "derive.md": "research/derive.md",
     "final_html_report.md": "research/final_html_report.md",
+    "c_codex_research.md": "research/c_codex_research.md",
 }
 
 
