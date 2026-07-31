@@ -14,6 +14,7 @@ from pathlib import Path
 from autoagent.artifacts import DEFAULT_CONFIG, ensure_project_config, make_run_dir, read_text, write_metadata, write_text
 from autoagent.config import load_config
 from autoagent.workflows.decompose import run_decompose_workflow
+from autoagent.workflows.research import run_research_workflow
 from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
 from autoagent.workflows.simple import run_simple_workflow
 from autoagent.workflows.task_exec import run_task_graph_execution
@@ -50,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to config JSON")
     parser.add_argument("--project", help="Project registry name under projects/<name>/ (config + runs)")
     parser.add_argument("--workspace", help="Override target workspace path")
-    parser.add_argument("--workflow", choices=["simple", "routed", "decompose"], default="simple", help="Workflow to run")
+    parser.add_argument("--workflow", choices=["simple", "routed", "decompose", "research"], default="simple", help="Workflow to run")
     parser.add_argument(
         "--task-type",
         choices=["auto", "backend", "frontend", "docs", "review"],
@@ -176,4 +177,6 @@ def main() -> int:
         return run_routed_workflow(args, config, request, run_dir)
     if args.workflow == "decompose":
         return run_decompose_workflow(args, config, request, run_dir)
+    if args.workflow == "research":
+        return run_research_workflow(args, config, request, run_dir)
     return run_simple_workflow(args, config, request, run_dir)
