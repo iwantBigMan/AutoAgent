@@ -20,13 +20,18 @@ from typing import Any
 from autoagent.artifacts import (
     DEFAULT_CONFIG,
     extract_json_block,
+    read_text,
     render_template,
     write_json,
     write_text,
 )
 from autoagent.config import Config
 from autoagent.research.adapters import verify
+from autoagent.research.convergence import decide_outer_pass, diff_verified_claims
 from autoagent.research.html_report import render_report_html, write_desktop_report
+from autoagent.research.seed_contract import (
+    build_seed_pin, detect_seed_violations, seed_pin_from_dict, seed_pin_to_dict,
+)
 from autoagent.research.snapshots import save_snapshot, write_sources_manifest
 from autoagent.research.types import StageId, StageResult, Verdict
 from autoagent.roles import load_roles, resolve_role
@@ -396,3 +401,100 @@ def run_research_workflow(args: Namespace, config: Config, request: str, run_dir
         pass
     print(f"Research run complete: {run_dir}\nReport: {desktop_path}")
     return 0
+
+
+# --- Slice 4 배선: 바깥 루프 · seed 계약 · 수렴 게이트 (스펙 §5·§1) ---
+
+
+def persist_research_state(run_dir: Path, state: dict) -> None:
+    """매 전이마다 research_state.json을 다시 써 재개 가능하게 한다(task_exec.persist_status 패턴)."""
+    write_json(run_dir / "research_state.json", state)
+
+
+def load_research_state(run_dir: Path) -> dict | None:
+    """재개 진입점: 이전 research_state.json이 있으면 읽어 반환, 없으면 None."""
+    path = run_dir / "research_state.json"
+    if not path.exists():
+        return None
+    return json.loads(read_text(path))
+
+
+def collect_verified_claims(stage_results: list[StageResult]) -> list[dict]:
+    """resolved 스테이지의 verdict에서 검증된 claim만 모은다.
+
+    exhausted_unverified·blocked 스테이지의 claim은 제외한다(F1 silent pass-through 격리).
+    verdict.raw['verified_claims']를 표준 소스로 본다.
+    """
+    claims: list[dict] = []
+    for r in stage_results:
+        if r.status != "resolved" or r.verdict is None:
+            continue  # F1: 미검증/차단 스테이지는 delta 계산에서 배제
+        claims.extend(r.verdict.raw.get("verified_claims", []) or [])
+    return claims
+
+
+def _extract_seed_candidate(stage_results: list[StageResult]) -> dict:
+    """pass 산출물이 주장하는 canonical 값 후보를 모은다(seed 위반 검사용)."""
+    candidate: dict = {}
+    for r in stage_results:
+        if r.verdict is None:
+            continue
+        candidate.update(r.verdict.raw.get("seed_candidate") or {})
+    return candidate
+
+
+def run_outer_loop(ctx, *, run_stage=None) -> dict:
+    """바깥 심화 루프(최대 max_outer). preamble에서 seed pin을 굳히고, pass마다 스테이지
+    루프→검증 claim 수집→pass간 diff→수렴/모순 판정을 하고 매 전이 research_state.json에
+    영속한다. run_stage는 테스트 주입용(기본은 run_stage_loop).
+    """
+    if run_stage is None:
+        run_stage = run_stage_loop
+
+    existing = load_research_state(ctx.run_dir)
+    if existing and existing.get("seed_pin"):
+        seed_pin = seed_pin_from_dict(existing["seed_pin"])
+    else:
+        seed_pin = build_seed_pin(ctx.seed_raw)
+
+    state = {
+        "outer_pass": 0, "stage": None, "inner_round": 0,
+        "seed_pin": seed_pin_to_dict(seed_pin),
+        "verified_claims": (existing or {}).get("verified_claims", []),
+        "stage_status": {}, "outer_decision": None,
+    }
+    persist_research_state(ctx.run_dir, state)
+
+    prev_claims: list[dict] = state["verified_claims"]
+    for outer_pass in range(1, ctx.max_outer + 1):
+        state["outer_pass"] = outer_pass
+        stage_results: list[StageResult] = []
+        for stage in ctx.stages:
+            state["stage"] = stage
+            result = run_stage(stage, outer_pass, ctx)
+            stage_results.append(result)
+            state["stage_status"][f"{outer_pass}:{stage}"] = result.status
+            state["inner_round"] = result.inner_rounds
+            persist_research_state(ctx.run_dir, state)  # 매 전이 영속(§6.3)
+
+        seed_violations = []
+        if outer_pass > 1:
+            seed_violations = detect_seed_violations(seed_pin, _extract_seed_candidate(stage_results))
+
+        curr_claims = collect_verified_claims(stage_results)
+        delta = diff_verified_claims(prev_claims, curr_claims)
+        decision = decide_outer_pass(
+            delta, seed_violations, outer_pass=outer_pass, max_outer=ctx.max_outer,
+            min_new_claims=ctx.min_new_claims,
+        )
+        state["verified_claims"] = prev_claims + delta.added  # 모순/미검증은 누적 안 함
+        state["outer_decision"] = {
+            "action": decision.action, "reason": decision.reason, "contradictions": decision.contradictions,
+        }
+        persist_research_state(ctx.run_dir, state)
+
+        if decision.action in {"early_stop", "gate"}:
+            break  # 수렴 조기종료 또는 모순/seed위반 게이트 승격 — silent 진행 금지
+        prev_claims = state["verified_claims"]
+
+    return state
