@@ -34,6 +34,24 @@ def test_empty_quote_is_not_grounded():
     assert quote_is_grounded("   ", "any text") is False
 
 
+def test_single_word_quote_not_grounded_even_if_substring():
+    # Finding 1: 단어 1개는 소스에 우연히 겹쳐도(리터럴 부분문자열이어도) 근거로 인정하지 않는다.
+    fetched = "The quick brown fox jumps over the lazy dog."
+    assert quote_is_grounded("the", fetched) is False
+
+
+def test_two_word_quote_not_grounded_even_if_substring():
+    # 2단어 조각도 최소 토큰 가드(3) 미만이므로 grounded가 아니다.
+    fetched = "The quick brown fox jumps over the lazy dog."
+    assert quote_is_grounded("brown fox", fetched) is False
+
+
+def test_three_word_verbatim_quote_is_grounded():
+    # 진짜 3단어 이상 verbatim 구절은 grounded여야 한다(가드가 정상 케이스를 막지 않음).
+    fetched = "The quick brown fox jumps over the lazy dog."
+    assert quote_is_grounded("brown fox jumps", fetched) is True
+
+
 def _stage_out():
     return {
         "claims": [
@@ -69,6 +87,21 @@ def test_fabricated_source_detected():
 def test_dead_source_detected():
     res = run_deterministic_checks(_stage_out(), {"s1": "In 2024 Acme reported revenue of 12M USD.", "s2": ""})
     assert "s2" in res.dead_sources
+
+
+def test_non_numeric_http_status_degrades_to_dead_not_crash():
+    # Finding 2: http_status가 비숫자/None이어도 크래시하지 말고 dead로 취급해야 한다.
+    so = _stage_out()
+    so["sources"][0]["http_status"] = "not-a-number"
+    res = run_deterministic_checks(so, {"s1": "In 2024 Acme reported revenue of 12M USD."})
+    assert "s1" in res.dead_sources
+
+
+def test_none_http_status_degrades_to_dead_not_crash():
+    so = _stage_out()
+    so["sources"][0]["http_status"] = None
+    res = run_deterministic_checks(so, {"s1": "In 2024 Acme reported revenue of 12M USD."})
+    assert "s1" in res.dead_sources
 
 
 def test_unverified_quote_when_not_substring():

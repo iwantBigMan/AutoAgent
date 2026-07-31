@@ -15,6 +15,12 @@ from autoagent.research.types import Finding
 
 _WS = re.compile(r"\s+")
 
+# Finding 1: 정규화된 인용이 최소 이 개수 이상의 whitespace 토큰(단어)을 가져야 grounded
+# 후보가 된다. 단어 1~2개짜리 조각은 소스에 우연히 겹치는 리터럴 부분문자열이어도
+# "실제로 소스를 읽고 인용했음"의 증거가 되지 못하므로(인용 날조 차단이 이 태스크의
+# 목적) 미달 시 부분문자열 여부와 무관하게 근거 없음(False)으로 판정한다.
+_MIN_QUOTE_TOKENS = 3
+
 
 def normalize_for_match(text: str) -> str:
     """부분문자열 대조용 정규화: 소문자화 + 연속 공백류를 단일 스페이스로.
@@ -29,9 +35,14 @@ def quote_is_grounded(matched_quote: str, fetched_text: str) -> bool:
     """정규화 후 matched_quote가 fetched_text의 부분문자열인지 판정한다.
 
     빈 quote(또는 공백뿐)는 근거 없음(False) — '인용 없이 supported' 날조를 차단한다.
+    최소 길이 가드(Finding 1): 정규화된 인용의 whitespace 토큰 수가 _MIN_QUOTE_TOKENS
+    미만이면, 그 조각이 fetched_text의 부분문자열이더라도 grounded 후보에서 제외한다
+    (단어 하나·두 개짜리는 소스와 우연히 겹칠 뿐 "실제로 읽고 인용했다"는 증거가 아님).
     """
     q = normalize_for_match(matched_quote)
     if not q:
+        return False
+    if len(q.split(" ")) < _MIN_QUOTE_TOKENS:
         return False
     return q in normalize_for_match(fetched_text)
 
@@ -67,7 +78,14 @@ def run_deterministic_checks(stage_out: dict, snapshot_texts: dict[str, str]) ->
     # (2) dead sources: status≠200 or 본문 빈.
     for ref, s in sources.items():
         body = texts.get(ref, "") or ""
-        if int(s.get("http_status", 0)) != 200 or not body.strip():
+        # Finding 2: http_status가 비숫자 문자열/None이면 int() 변환이 ValueError/
+        # TypeError로 grounding 전체를 크래시시킨다. 결정적 판정은 크래시하지 않고
+        # 안전측(비200=dead)으로 degrade해야 하므로 파싱 실패를 200이 아닌 것으로 본다.
+        try:
+            status_ok = int(s.get("http_status", 0)) == 200
+        except (TypeError, ValueError):
+            status_ok = False
+        if not status_ok or not body.strip():
             if ref not in seen_dead:
                 seen_dead.add(ref)
                 res.dead_sources.append(ref)
