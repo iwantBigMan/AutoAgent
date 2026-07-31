@@ -168,5 +168,11 @@ def verify(
         from autoagent.research.data_quality import run_data_quality
         return run_data_quality(stage_out, run_dir, verifier_agent=verifier_agent)
     if adapter == "source_grounding":
-        raise SystemExit("Adapter 'source_grounding' not implemented in this slice (Slice 3).")
+        # d 스테이지 하이브리드: 스냅샷 결정론 + Codex 의미대조. 모델 stdout은 오케스트레이터가
+        # stage_out["model_raw_text"]에 실어 전달한다(verify 계약 시그니처 불변 유지).
+        from autoagent.research.source_grounding import verify_source_grounding
+        return verify_source_grounding(
+            stage_out, run_dir, verifier_agent=verifier_agent, config=config,
+            model_raw_text=stage_out.get("model_raw_text", ""),
+        )
     raise SystemExit(f"Unknown verify adapter: {adapter!r}")
