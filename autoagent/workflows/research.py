@@ -45,10 +45,57 @@ from autoagent.roles import load_roles, resolve_role
 from autoagent.routing import choose_researcher
 from autoagent.runner import (
     AgentCallBudget,
+    AgentCallBudgetStopped,
     require_command,
     run_process,
     write_command_artifact,
 )
+
+# capture 상한(§6.4). 리서처/검증기 stdout이 다음 프롬프트로 재주입될 때 tail 절단해
+# 컨텍스트 팽창을 막는다. config research_max_capture_chars로 조정.
+MAX_CAPTURE_CHARS = 12000
+
+
+def _truncate_capture(text: str, limit: int = MAX_CAPTURE_CHARS) -> str:
+    """텍스트가 limit을 넘으면 머리(limit자)만 남기고 tail을 절단 표식으로 대체한다.
+
+    재주입되는 컨텍스트(예: STAGE_A_OUTPUT을 derive/report로 넘길 때)의 폭주를 막는다.
+    JSON 파싱 대상(verify로 넘기는 원문)엔 적용하지 않는다 — 파싱 깨짐 방지.
+    """
+    if len(text) <= limit:
+        return text
+    dropped = len(text) - limit
+    return text[:limit] + f"\n\n[... {dropped} chars truncated (MAX_CAPTURE_CHARS)]"
+
+
+class TieredBudgetStopped(Exception):
+    """스테이지별/outer별 호출 상한 초과. 전역 AgentCallBudgetStopped와 별개(계층 예산)."""
+
+
+@dataclass
+class TieredCallCap:
+    """전역 예산 위에 얹는 스테이지별/outer별 호출 상한(§6.4, F5 폭주 방어).
+
+    per_stage: (outer_pass, stage) 조합당 최대 모델 호출 수.
+    per_outer: 한 outer_pass 전체 최대 모델 호출 수.
+    dry-run에선 charge를 부르지 않는다(실제 호출만 과금).
+    """
+
+    per_stage: int
+    per_outer: int
+    _by_stage: dict[tuple[int, str], int] = field(default_factory=dict)
+    _by_outer: dict[int, int] = field(default_factory=dict)
+
+    def charge(self, outer_pass: int, stage: str) -> None:
+        s = self._by_stage.get((outer_pass, stage), 0) + 1
+        o = self._by_outer.get(outer_pass, 0) + 1
+        if self.per_stage > 0 and s > self.per_stage:
+            raise TieredBudgetStopped(f"stage cap {self.per_stage} exceeded at pass {outer_pass} stage {stage}")
+        if self.per_outer > 0 and o > self.per_outer:
+            raise TieredBudgetStopped(f"outer cap {self.per_outer} exceeded at pass {outer_pass}")
+        self._by_stage[(outer_pass, stage)] = s
+        self._by_outer[outer_pass] = o
+
 
 # 이 슬라이스의 최소경로 스테이지 순서. b/c/d는 다음 슬라이스에서 채운다.
 MINIMAL_PATH: list[StageId] = ["a", "derive"]
@@ -266,6 +313,8 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             "MIN_FINDINGS": str(getattr(ctx.config, "crossmodel_min_findings", 3)),
         }
         values.update(_seed_fields(ctx))  # SEED_COMPANY/MARKET/CURRENCY/PERIOD/UNIT/AS_OF 분해 주입
+        if ctx.tiered is not None and not ctx.args.dry_run:
+            ctx.tiered.charge(outer_pass, stage)  # 계층 예산(§6.4): 리서처 호출 전 스테이지별/outer별 과금
         researcher_out = _run_agent_step(
             ctx, agent=researcher, role_id="researcher",
             name=f"stage_{stage}_p{outer_pass}_r{inner}_researcher",
@@ -282,6 +331,8 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             verdict = _run_stage_d_verify(ctx, researcher_out, stage, outer_pass, inner)
         else:
             # 스테이지별 검증기 프롬프트(b는 전용 b_market_verifier.md, 그 외 crossmodel).
+            if ctx.tiered is not None and not ctx.args.dry_run:
+                ctx.tiered.charge(outer_pass, stage)  # 계층 예산(§6.4): 검증기 호출 전 과금
             verifier_out = _run_agent_step(
                 ctx, agent=verifier, role_id="verifier",
                 name=f"stage_{stage}_p{outer_pass}_r{inner}_verifier",
@@ -311,8 +362,12 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
         _persist_state(ctx)
 
         if verdict.status == "pass":
-            _inject_verified_claims(verdict, researcher_out)  # B2: 리서처 claims→verdict.raw 실주입
-            ctx.stage_outputs[stage] = researcher_out
+            _inject_verified_claims(verdict, researcher_out)  # B2: 리서처 claims→verdict.raw 실주입(원문 사용)
+            # capture 상한(§6.4): inject/verify는 위에서 이미 원문 researcher_out으로 끝났으니,
+            # 이후 재주입(STAGE_A_OUTPUT 등)에 쓰일 저장본만 tail 절단한다.
+            ctx.stage_outputs[stage] = _truncate_capture(
+                researcher_out, getattr(ctx.config, "research_max_capture_chars", MAX_CAPTURE_CHARS)
+            )
             return StageResult(
                 stage_id=stage, status="resolved",
                 output_path=f"stage_{stage}_p{outer_pass}_r{inner}_researcher.md",
@@ -369,6 +424,10 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
     ctx = ResearchContext(
         args=args, config=config, request=request or "", run_dir=run_dir, budget=budget, seed_contract="",
         state=state,
+        # 계층 예산(§6.4, Task 29): 전역 budget 위에 스테이지별/outer별 상한을 얹는다.
+        tiered=TieredCallCap(
+            getattr(config, "research_per_stage_calls", 6), getattr(config, "research_per_outer_calls", 40)
+        ),
     )
 
     # preamble: seed 확정 후 read-only pin(재개면 기존 pin 재사용, seed 스텝 스킵).
@@ -395,55 +454,60 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
 
     # M3: 루프가 한 번도 안 돌아도(예: max_outer=0) 최종 리포트에서 항상 바인딩되도록 선초기화.
     stage_results: list[StageResult] = []
-    for outer_pass in range(resume_outer, max_outer + 1):
-        state["outer_pass"] = outer_pass
+    try:
+        for outer_pass in range(resume_outer, max_outer + 1):
+            state["outer_pass"] = outer_pass
+            persist_state(run_dir, state)
+
+            # 고비용 심화 진입 게이트(pass 2+, forced).
+            deepen_trigger = evaluate_gate(event="deepen_entry", outer_pass=outer_pass,
+                                           stage_results=[], contradiction=False, config=config)
+            if should_pause(deepen_trigger, auto_approve_nonbranch=auto_nonbranch):
+                return pause_at_gate(run_dir, deepen_trigger, state)
+
+            stage_results = []  # 이 pass의 스테이지 결과(위에서 선초기화한 변수를 pass마다 재설정)
+            for stage in STAGE_ORDER:
+                state["stage"] = stage
+                if is_stage_done(state, stage):
+                    continue  # 재개 시 resolved 스테이지 건너뜀
+                result = run_stage_loop(stage, outer_pass, ctx)
+                stage_results.append(result)
+                set_stage_status(run_dir, state, stage, result.status)
+
+                # 스테이지 경계 게이트(blocked·exhausted 다수).
+                boundary = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
+                                         stage_results=stage_results, contradiction=False, config=config)
+                if should_pause(boundary, auto_approve_nonbranch=auto_nonbranch):
+                    return pause_at_gate(run_dir, boundary, state)
+
+            # pass간 검증 claim 수집·delta·수렴/모순 판정.
+            curr_claims = collect_verified_claims(stage_results)
+            delta = diff_verified_claims(prev_claims, curr_claims)
+            seed_violations = []
+            if outer_pass > 1:
+                seed_violations = detect_seed_violations(
+                    seed_pin_from_dict(state["seed_pin"]), _extract_seed_candidate(stage_results)
+                )
+            decision = decide_outer_pass(delta, seed_violations, outer_pass=outer_pass,
+                                         max_outer=max_outer, min_new_claims=min_new_claims)
+            state["verified_claims"] = prev_claims + delta.added
+            state["outer_decision"] = {"action": decision.action, "reason": decision.reason,
+                                       "contradictions": decision.contradictions}
+            persist_state(run_dir, state)
+
+            if decision.action == "gate":
+                # 모순/seed위반 = forced 게이트(절대 생략 안 함).
+                trigger = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
+                                        stage_results=stage_results, contradiction=True, config=config)
+                if trigger is not None:
+                    return pause_at_gate(run_dir, trigger, state)
+            if decision.action in {"early_stop", "gate"}:
+                break
+            prev_claims = state["verified_claims"]
+    except (AgentCallBudgetStopped, TieredBudgetStopped):
+        # §6.4/F5: 전역·계층 예산 소진 시 크래시 대신 partial 상태로 안전 종료한다.
+        # 루프를 여기서 멈추고 아래 커버리지 리포트 렌더 블록으로 자연히 넘어간다(그대로 진행).
         persist_state(run_dir, state)
-
-        # 고비용 심화 진입 게이트(pass 2+, forced).
-        deepen_trigger = evaluate_gate(event="deepen_entry", outer_pass=outer_pass,
-                                       stage_results=[], contradiction=False, config=config)
-        if should_pause(deepen_trigger, auto_approve_nonbranch=auto_nonbranch):
-            return pause_at_gate(run_dir, deepen_trigger, state)
-
-        stage_results = []  # 이 pass의 스테이지 결과(위에서 선초기화한 변수를 pass마다 재설정)
-        for stage in STAGE_ORDER:
-            state["stage"] = stage
-            if is_stage_done(state, stage):
-                continue  # 재개 시 resolved 스테이지 건너뜀
-            result = run_stage_loop(stage, outer_pass, ctx)
-            stage_results.append(result)
-            set_stage_status(run_dir, state, stage, result.status)
-
-            # 스테이지 경계 게이트(blocked·exhausted 다수).
-            boundary = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
-                                     stage_results=stage_results, contradiction=False, config=config)
-            if should_pause(boundary, auto_approve_nonbranch=auto_nonbranch):
-                return pause_at_gate(run_dir, boundary, state)
-
-        # pass간 검증 claim 수집·delta·수렴/모순 판정.
-        curr_claims = collect_verified_claims(stage_results)
-        delta = diff_verified_claims(prev_claims, curr_claims)
-        seed_violations = []
-        if outer_pass > 1:
-            seed_violations = detect_seed_violations(
-                seed_pin_from_dict(state["seed_pin"]), _extract_seed_candidate(stage_results)
-            )
-        decision = decide_outer_pass(delta, seed_violations, outer_pass=outer_pass,
-                                     max_outer=max_outer, min_new_claims=min_new_claims)
-        state["verified_claims"] = prev_claims + delta.added
-        state["outer_decision"] = {"action": decision.action, "reason": decision.reason,
-                                   "contradictions": decision.contradictions}
-        persist_state(run_dir, state)
-
-        if decision.action == "gate":
-            # 모순/seed위반 = forced 게이트(절대 생략 안 함).
-            trigger = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
-                                    stage_results=stage_results, contradiction=True, config=config)
-            if trigger is not None:
-                return pause_at_gate(run_dir, trigger, state)
-        if decision.action in {"early_stop", "gate"}:
-            break
-        prev_claims = state["verified_claims"]
 
     # 커버리지 매트릭스+배너를 상단에 박은 최종 리포트.
     # M1 stage_status 키 규약 통일: set_stage_status(Task 25)가 평면 키(stage→status)로 쓰므로
