@@ -112,9 +112,12 @@ def write_desktop_report(html: str, filename: str) -> Path:
     """바탕화면(~/Desktop)에 리포트 HTML을 UTF-8로 기록하고 경로를 반환한다.
 
     브라우저 오픈은 호출부가 결정한다(os.startfile). Desktop이 없으면 홈에 저장.
+    filename은 `..`나 경로 구분자를 포함해도 `Path(filename).name`으로 정규화해
+    베이스네임만 취한다 — 타깃 디렉터리 밖으로 쓰는 path traversal을 막는다.
     """
     desktop = Path.home() / "Desktop"
     target_dir = desktop if desktop.exists() else Path.home()
-    path = target_dir / filename
+    safe_name = Path(filename).name
+    path = target_dir / safe_name
     path.write_text(html, encoding="utf-8", newline="\n")
     return path
