@@ -97,3 +97,22 @@ def test_verify_dispatch_crossmodel(tmp_path: Path) -> None:
 def test_verify_unknown_adapter_raises(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         verify("weird", {"verifier_raw_text": ""}, tmp_path, verifier_agent="claude", config=None)
+
+
+def test_stray_braces_in_prose_around_fence_still_parses() -> None:
+    """마커+fenced JSON은 정상인데 fence 밖 산문에 stray { }가 섞인 경우.
+
+    extract_json_block의 브레이스매칭 폴백(전체 텍스트 첫 { ~ 마지막 })으로 떨어지면
+    잘못된 span이 되어 JSON 파싱이 실패하고 blocked로 조용히 삼켜진다(버그). 마커
+    앵커드 fence 추출이면 fence 밖 산문은 무시되어 정상 pass가 나와야 한다.
+    """
+    findings = '[{"claim_id": "a1", "severity": "minor", "category": "scope_miss", ' \
+        '"rebuttal": "r", "fix_directive": "f", "evidence_pointer": "s1"}]'
+    text = (
+        "검증기 서론입니다. 참고로 dict 예시 `{foo}` 같은 형태를 곧 보게 됩니다.\n"
+        + _verdict_text("pass", findings)
+        + "\n결론: 위 JSON을 참고하세요. 추가로 `{bar}` 같은 표기도 등장할 수 있습니다."
+    )
+    v = parse_crossmodel_verdict(text, "a")
+    assert v.status == "pass"
+    assert v.findings[0].claim_id == "a1"

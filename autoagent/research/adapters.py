@@ -7,6 +7,8 @@ verify(adapter, ...)가 어댑터별 검증기로 라우팅한다. 이 슬라이
 """
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,31 @@ from autoagent.research.types import Finding, Verdict
 
 
 CROSSMODEL_MARKER = "CROSSMODEL_VERDICT:"
+
+# 마커 다음에 오는 fenced ```json ... ``` 블록만 잡는다(마커 이전 산문은 대상 밖).
+_MARKER_FENCE_RE = re.compile(
+    re.escape(CROSSMODEL_MARKER) + r".*?```(?:json)?\s*(\{.*?\})\s*```",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+
+
+def _extract_crossmodel_json(raw_text: str) -> dict[str, Any]:
+    """crossmodel verdict 원문에서 JSON을 마커 앵커드로 추출한다.
+
+    fence 밖 산문(예: "dict 예시 `{foo}` 참고")에 있는 stray brace가 공유
+    extract_json_block의 브레이스매칭 폴백(전체 텍스트 첫 { ~ 마지막 })을 오염시켜
+    잘못된 span/무효 JSON으로 떨어지는 문제를 막는다. 마커 뒤 fenced 블록을 직접
+    정규식으로 찾아 그 안(fence 내부)만 파싱 대상으로 삼는다. fenced 블록이 없을
+    때만 마커 이후 텍스트로 한정한 채 기존 extract_json_block 폴백을 쓴다(공유
+    유틸 자체는 수정하지 않는다 — TASK_GRAPH_JSON 호출부 영향 방지).
+    """
+    fence_match = _MARKER_FENCE_RE.search(raw_text)
+    if fence_match:
+        return json.loads(fence_match.group(1))
+
+    marker_idx = raw_text.find(CROSSMODEL_MARKER)
+    tail = raw_text[marker_idx:] if marker_idx != -1 else raw_text
+    return extract_json_block(tail)
 
 
 def parse_crossmodel_verdict(raw_text: str, stage_id: str, *, config: Any = None) -> Verdict:
@@ -33,9 +60,9 @@ def parse_crossmodel_verdict(raw_text: str, stage_id: str, *, config: Any = None
     # 1) 마커 부재는 판정 불가(blocked). 자유서술만 온 경우를 명확히 격리한다.
     if CROSSMODEL_MARKER not in raw_text:
         return Verdict(status="blocked", adapter="crossmodel", stage_id=stage_id, findings=[], raw={})
-    # 2) fenced JSON 파싱(코드 하네스의 extract_json_block 재사용). 실패 시 blocked.
+    # 2) 마커 앵커드 fenced JSON 파싱. 실패 시 blocked.
     try:
-        data = extract_json_block(raw_text)
+        data = _extract_crossmodel_json(raw_text)
     except Exception:  # noqa: BLE001 - JSON 없음/깨짐 전부 판정 불가로 격리
         return Verdict(status="blocked", adapter="crossmodel", stage_id=stage_id, findings=[], raw={})
 
