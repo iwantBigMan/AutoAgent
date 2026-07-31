@@ -70,3 +70,46 @@ def diff_verified_claims(prev: list[dict], curr: list[dict]) -> ClaimDelta:
 def is_converged(delta: ClaimDelta, *, min_new_claims: int) -> bool:
     """새로 검증된 claim이 임계 미만이고 모순이 없으면 수렴(조기 종료 가능)으로 판정한다."""
     return delta.delta_count < max(min_new_claims, 1) and not delta.contradictions
+
+
+from typing import Literal
+
+
+@dataclass
+class OuterPassDecision:
+    """바깥 루프의 다음 행동. gate는 §6.2에 따라 절대 생략 불가."""
+
+    action: Literal["continue", "early_stop", "gate"]
+    reason: str
+    contradictions: list[dict]
+
+
+def decide_outer_pass(
+    delta: ClaimDelta, seed_violations: list[str], *,
+    outer_pass: int, max_outer: int, min_new_claims: int,
+) -> OuterPassDecision:
+    """pass 결과로 다음 행동을 결정한다. 우선순위: 모순/seed위반 gate > 수렴/마지막 early_stop > continue."""
+    # (1) 모순 또는 seed 계약 위반 = 분기점 게이트(절대 생략 안 함, §6.2).
+    if delta.contradictions or seed_violations:
+        bits = []
+        if delta.contradictions:
+            bits.append(f"검증 claim 모순 {len(delta.contradictions)}건")
+        if seed_violations:
+            bits.append(f"seed 계약 위반 {len(seed_violations)}건")
+        return OuterPassDecision(action="gate", reason="; ".join(bits), contradictions=delta.contradictions)
+    # (2) 수렴(신규 검증 claim이 임계 미만) 또는 마지막 pass 도달 = 조기/정상 종료.
+    if delta.delta_count < max(min_new_claims, 1):
+        return OuterPassDecision(
+            action="early_stop",
+            reason=f"수렴(신규 검증 claim {delta.delta_count} < 임계 {min_new_claims})",
+            contradictions=[],
+        )
+    if outer_pass >= max_outer:
+        return OuterPassDecision(
+            action="early_stop", reason=f"바깥 루프 상한 도달(pass {outer_pass}/{max_outer})", contradictions=[],
+        )
+    # (3) 개선 충분 + 여지 있음 = 다음 pass 진행.
+    return OuterPassDecision(
+        action="continue",
+        reason=f"개선 지속(신규 검증 claim {delta.delta_count}), 다음 pass 진입", contradictions=[],
+    )

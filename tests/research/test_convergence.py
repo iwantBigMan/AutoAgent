@@ -50,3 +50,41 @@ def test_diff_empty_prev_all_added():
     delta = diff_verified_claims([], curr)
     assert delta.delta_count == 2
     assert delta.contradictions == []
+
+
+from autoagent.research.convergence import OuterPassDecision, decide_outer_pass
+
+
+def _delta(added=0, contradictions=None):
+    return ClaimDelta(added=[{}] * added, unchanged=[], contradictions=contradictions or [], delta_count=added)
+
+
+def test_decide_gate_on_contradiction_even_if_converged():
+    delta = _delta(added=0, contradictions=[{"claim_id": "c1"}])
+    d = decide_outer_pass(delta, [], outer_pass=2, max_outer=2, min_new_claims=2)
+    assert isinstance(d, OuterPassDecision)
+    assert d.action == "gate"
+    assert d.contradictions == [{"claim_id": "c1"}]
+
+
+def test_decide_gate_on_seed_violation():
+    delta = _delta(added=5)
+    d = decide_outer_pass(delta, ["seed 계약 위반: base_currency ..."], outer_pass=2, max_outer=2, min_new_claims=2)
+    assert d.action == "gate"
+    assert "seed" in d.reason
+
+
+def test_decide_early_stop_on_convergence():
+    d = decide_outer_pass(_delta(added=1), [], outer_pass=1, max_outer=2, min_new_claims=2)
+    assert d.action == "early_stop"
+    assert "수렴" in d.reason
+
+
+def test_decide_early_stop_at_last_pass():
+    d = decide_outer_pass(_delta(added=9), [], outer_pass=2, max_outer=2, min_new_claims=2)
+    assert d.action == "early_stop"
+
+
+def test_decide_continue_when_progress_and_not_last():
+    d = decide_outer_pass(_delta(added=5), [], outer_pass=1, max_outer=2, min_new_claims=2)
+    assert d.action == "continue"
