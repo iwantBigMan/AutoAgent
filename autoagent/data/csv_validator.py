@@ -76,3 +76,49 @@ def _read_csv_rows(path: Path) -> tuple[str, list[str], list[list[str]]]:
     raise ValueError(
         f"failed to decode CSV with any of {_ENCODING_FALLBACKS}: {path} ({last_error})"
     )
+
+
+def _is_null(cell: str) -> bool:
+    """결측 판정: None/빈문자열/공백만이면 결측으로 본다(관대한 null 정의)."""
+    return cell is None or cell.strip() == ""
+
+
+def validate_csv(path: Path) -> CSVQualityMetrics:
+    """CSV 하나를 읽어 결정론적 품질 지표(CSVQualityMetrics)를 산출한다.
+
+    파일을 못 읽으면 _read_csv_rows가 ValueError를 올리고 여기서 잡지 않는다
+    (조용한 skip 금지). null 비율은 열별, duplicate는 데이터 행 전체 튜플 기준.
+    헤더와 열 수가 다른 행은 format_anomalies로 남기되 파싱은 계속한다.
+    """
+    encoding, header, data_rows = _read_csv_rows(path)
+    columns = list(header)
+    column_count = len(columns)
+    row_count = len(data_rows)
+
+    anomalies: list[str] = []
+    null_counts = {col: 0 for col in columns}
+    seen: set[tuple[str, ...]] = set()
+    duplicate_row_count = 0
+    for idx, row in enumerate(data_rows, start=1):
+        if len(row) != column_count:
+            anomalies.append(f"row {idx}: column count {len(row)} != header {column_count}")
+        for col_idx, col in enumerate(columns):
+            cell = row[col_idx] if col_idx < len(row) else ""
+            if _is_null(cell):
+                null_counts[col] += 1
+        key = tuple(row)
+        if key in seen:
+            duplicate_row_count += 1
+        else:
+            seen.add(key)
+
+    null_ratio_by_column = {
+        col: (null_counts[col] / row_count if row_count else 0.0) for col in columns
+    }
+    duplicate_ratio = duplicate_row_count / row_count if row_count else 0.0
+
+    return CSVQualityMetrics(
+        path=str(path), row_count=row_count, column_count=column_count, columns=columns,
+        null_ratio_by_column=null_ratio_by_column, duplicate_row_count=duplicate_row_count,
+        duplicate_ratio=duplicate_ratio, format_anomalies=anomalies, encoding_detected=encoding,
+    )
