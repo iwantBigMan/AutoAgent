@@ -49,6 +49,8 @@ PROMPT_ALIASES = {
     "derive.md": "research/derive.md",
     "final_html_report.md": "research/final_html_report.md",
     "c_codex_research.md": "research/c_codex_research.md",
+    "d_fact_report.md": "research/d_fact_report.md",
+    "d_grounding_verify.md": "research/d_grounding_verify.md",
 }
 
 

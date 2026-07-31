@@ -27,6 +27,7 @@ from autoagent.artifacts import (
 from autoagent.config import Config
 from autoagent.research.adapters import verify
 from autoagent.research.html_report import render_report_html, write_desktop_report
+from autoagent.research.snapshots import save_snapshot, write_sources_manifest
 from autoagent.research.types import StageId, StageResult, Verdict
 from autoagent.roles import load_roles, resolve_role
 from autoagent.routing import choose_researcher
@@ -39,8 +40,8 @@ from autoagent.runner import (
 
 # 이 슬라이스의 최소경로 스테이지 순서. b/c/d는 다음 슬라이스에서 채운다.
 MINIMAL_PATH: list[StageId] = ["a", "derive"]
-STAGE_ADAPTER = {"a": "crossmodel", "b": "crossmodel", "c": "data_quality", "derive": "crossmodel"}
-STAGE_PROMPT = {"a": "a_researcher.md", "c": "c_codex_research.md", "derive": "derive.md"}
+STAGE_ADAPTER = {"a": "crossmodel", "b": "crossmodel", "c": "data_quality", "d": "source_grounding", "derive": "crossmodel"}
+STAGE_PROMPT = {"a": "a_researcher.md", "c": "c_codex_research.md", "d": "d_fact_report.md", "derive": "derive.md"}
 # 스테이지별 검증기 프롬프트. 기본은 crossmodel_verifier.md, b는 전용 프롬프트.
 # c(코드검증)·d(source_grounding)는 crossmodel 프롬프트를 쓰지 않으므로 매핑에서 제외한다.
 STAGE_VERIFIER_PROMPT = {"a": "crossmodel_verifier.md", "derive": "crossmodel_verifier.md"}
@@ -167,6 +168,50 @@ def _run_stage_c_verify(ctx: "ResearchContext", researcher_out: str) -> Verdict:
     )
 
 
+def _parse_stage_out(raw: str) -> dict[str, Any]:
+    """리서처 stdout에서 fenced JSON stage_out을 뽑는다(실패 시 빈 스켈레톤)."""
+    try:
+        return extract_json_block(raw)
+    except Exception:  # noqa: BLE001 - dry-run/파싱 실패여도 최소 스켈레톤으로 진행
+        return {"stage_id": "d", "claims": [], "sources": [], "report_md": raw[:2000]}
+
+
+def _run_stage_d_verify(ctx: "ResearchContext", researcher_out: str, stage: str, outer_pass: int, inner: int):
+    """d 검증 경로: 스냅샷 저장 → Codex 검증기 렌더/실행 → source_grounding verify.
+
+    dry-run이면 검증기 stdout은 빈 문자열이고 결정론 검사만으로 verify가 돈다(모델 미호출).
+    """
+    stage_out = _parse_stage_out(researcher_out)
+    # 리서처가 fetch한 sources[].fetched_text를 runs/sources/*.txt 스냅샷으로 고정.
+    sources_dir = ctx.run_dir / "sources"
+    snaps = []
+    for s in stage_out.get("sources", []):
+        snaps.append(save_snapshot(
+            sources_dir, s.get("ref_id", "s?"), s.get("url", ""), s.get("fetched_text", ""),
+            http_status=int(s.get("http_status", 0)), fetch_ts=s.get("fetch_ts"),
+        ))
+    write_sources_manifest(ctx.run_dir, snaps)
+
+    # Codex 검증기(스냅샷만) 렌더/실행.
+    import json as _json
+    verifier_out = _run_agent_step(
+        ctx, agent="codex", role_id="verifier",
+        name=f"stage_{stage}_p{outer_pass}_r{inner}_verifier",
+        prompt_name="d_grounding_verify.md",
+        prompt_values={
+            "REPORT_MD": stage_out.get("report_md", ""),
+            "CLAIMS_JSON": _json.dumps(stage_out.get("claims", []), ensure_ascii=False),
+            "SOURCES_SNAPSHOTS_JSON": _json.dumps(stage_out.get("sources", []), ensure_ascii=False),
+        },
+        next_step=f"verify:{stage}",
+        dry_output="",  # dry-run: 모델 없이 결정론 검사만
+    )
+    return verify(
+        "source_grounding", {**stage_out, "model_raw_text": verifier_out},
+        ctx.run_dir, verifier_agent="codex", config=ctx.config,
+    )
+
+
 def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> StageResult:
     """안쪽 루프: 리서치→검증→보정 최대 3회. 통과=resolved, 소진=exhausted_unverified.
 
@@ -212,6 +257,9 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
         if stage == "c":
             # c: 리서처 stdout(DATA_QUALITY_OUTPUT)을 코드 검증기로 검증(모델 0회).
             verdict = _run_stage_c_verify(ctx, researcher_out)
+        elif stage == "d":
+            # d: 리서처 JSON 파싱 → 스냅샷 저장 → Codex 검증기(스냅샷만) → source_grounding verify.
+            verdict = _run_stage_d_verify(ctx, researcher_out, stage, outer_pass, inner)
         else:
             # 스테이지별 검증기 프롬프트(b는 전용 b_market_verifier.md, 그 외 crossmodel).
             verifier_out = _run_agent_step(
