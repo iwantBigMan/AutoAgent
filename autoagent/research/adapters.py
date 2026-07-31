@@ -163,6 +163,10 @@ def verify(
             },
         )
         return verdict
-    if adapter in {"data_quality", "source_grounding"}:
-        raise SystemExit(f"Adapter '{adapter}' not implemented in this slice (later slice).")
+    if adapter == "data_quality":
+        # data_quality: 코드 실측 전용(모델 0회). config·verifier_agent 모델 미사용.
+        from autoagent.research.data_quality import run_data_quality
+        return run_data_quality(stage_out, run_dir, verifier_agent=verifier_agent)
+    if adapter == "source_grounding":
+        raise SystemExit("Adapter 'source_grounding' not implemented in this slice (Slice 3).")
     raise SystemExit(f"Unknown verify adapter: {adapter!r}")
