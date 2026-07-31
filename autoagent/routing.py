@@ -254,3 +254,28 @@ def choose_implementer(
         return "claude", "codex", "Docs/review routes have no implementation step."
 
     return "claude", "codex", "Fallback implementer selection."
+
+
+# 스테이지별 리서처 배정(스펙 §3). 웹 리서치는 전부 Claude, CSV 정제(c)만 Codex.
+# verifier는 항상 반대 모델을 코드가 기계 계산한다(구현자≠리뷰어 불변식과 동형).
+RESEARCHER_BY_STAGE = {
+    "a": "claude",
+    "b": "claude",
+    "c": "codex",
+    "d": "claude",
+    "derive": "claude",
+}
+
+
+def choose_researcher(stage: str) -> tuple[str, str, str]:
+    """(리서처, 검증기, 사유)를 반환. 검증기는 항상 리서처와 반대 모델이다.
+
+    choose_implementer와 동형 계약: 리서처를 테이블로 정하고 verifier는 반대 모델을
+    코드가 기계 계산한다. 바깥 심화 2회 사이에도 이 쌍은 고정된다(계통 표류 차단).
+    """
+    researcher = RESEARCHER_BY_STAGE.get(stage)
+    if researcher is None:
+        raise SystemExit(f"Unknown research stage: {stage!r}")
+    verifier = "codex" if researcher == "claude" else "claude"
+    reason = f"Stage {stage} researcher={researcher}, verifier={verifier} (opposite model)."
+    return researcher, verifier, reason
