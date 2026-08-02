@@ -12,6 +12,7 @@ from __future__ import annotations
 import codecs
 import csv
 import hashlib
+import io
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -67,7 +68,10 @@ def _read_csv_rows(path: Path) -> tuple[str, list[str], list[list[str]]]:
         except (UnicodeDecodeError, UnicodeError) as exc:
             last_error = exc
             continue
-        reader = csv.reader(text.splitlines())
+        # [T8]: text.splitlines()로 먼저 줄을 쪼개면 quoted 필드 안에 든 개행(RFC-4180
+        # 허용)이 csv.reader에 닿기 전에 이미 잘려나간다. io.StringIO로 넘겨 csv.reader가
+        # 직접 quote-상태를 추적하며 줄을 읽게 해 필드 내부 개행을 보존한다.
+        reader = csv.reader(io.StringIO(text))
         rows = list(reader)
         if not rows:
             return enc, [], []

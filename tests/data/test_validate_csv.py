@@ -57,3 +57,14 @@ def test_undecodable_propagates(tmp_path: Path) -> None:
     p.write_bytes(b"\x81\x00\xff\xfe\x9d\x8f\n")
     with pytest.raises(ValueError):
         validate_csv(p)
+
+
+def test_quoted_field_with_embedded_newline_is_preserved(tmp_path: Path) -> None:
+    # [T8]: csv.reader(text.splitlines())는 quoted 필드 내부의 개행을 splitlines()가
+    # 먼저 잘라버려 RFC-4180 위반으로 깨뜨린다. io.StringIO 경유로 고쳤으니, 개행을
+    # 품은 필드가 한 행으로 유지되고 row/column count도 올바르게 나와야 한다.
+    p = _w(tmp_path, "multiline.csv", 'id,note\n1,"a\nb"\n2,plain\n')
+    m = validate_csv(p)
+    assert m.row_count == 2       # 개행이 새 행으로 오분할되지 않음
+    assert m.column_count == 2
+    assert m.duplicate_row_count == 0

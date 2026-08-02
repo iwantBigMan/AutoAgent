@@ -54,9 +54,6 @@ def test_prompts_render_with_placeholders() -> None:
         "RESEARCHER_OUTPUT": "산출물 본문",
         "STAGE_A_OUTPUT": "a 산출물",
         "DERIVE_OUTPUT": "derive 산출물",
-        "COVERAGE_MATRIX_MD": "| a | passed |",
-        "COVERAGE_BANNER": "",
-        "COVERAGE_MATRIX": "<table></table>",
         "REPORT_BODY_MD": "# 리포트",
     }
     for name in ["seed_contract.md", "a_researcher.md", "crossmodel_verifier.md", "derive.md", "final_html_report.md"]:

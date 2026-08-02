@@ -1,7 +1,9 @@
 """검증 어댑터 디스패치 + crossmodel 어댑터.
 
-verify(adapter, ...)가 어댑터별 검증기로 라우팅한다. 이 슬라이스는 crossmodel만
-구현한다(data_quality/source_grounding은 다음 슬라이스). crossmodel은 검증기 원문에서
+verify(adapter, ...)가 어댑터별 검증기로 라우팅한다. crossmodel/data_quality/
+source_grounding 세 어댑터 모두 배선 완료(각각 아래 verify() 분기 참고). crossmodel은
+이 모듈에 직접 구현하고, data_quality/source_grounding은 각자의 모듈로 위임한다.
+crossmodel은 검증기 원문에서
 마커+fenced JSON을 파싱하고, **코드가 findings를 집계해 status를 재계산**한다
 (검증기가 pass라 적어도 major/critical이 있으면 needs_changes로 강등 — 자기모순 방지).
 """

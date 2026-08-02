@@ -53,3 +53,14 @@ def test_sha256_matches_hashlib(tmp_path: Path) -> None:
     data = b"name,city\na,b\n"
     p = _write_bytes(tmp_path, "h.csv", data)
     assert _sha256_of_file(p) == hashlib.sha256(data).hexdigest()
+
+
+def test_quoted_multiline_field_newline_preserved(tmp_path: Path) -> None:
+    # [T8]: csv.reader(text.splitlines())는 RFC-4180 quoted 필드 내부 개행을
+    # splitlines()가 먼저 끊어버려 깨뜨린다(io.StringIO 경유로 고침). 필드 값 안의
+    # 개행이 그대로 살아있어야 하고, 행 수도 3(헤더 제외 데이터 2행)이어야 한다.
+    p = _write_bytes(tmp_path, "multiline.csv", 'id,note\n1,"a\nb"\n2,plain\n'.encode("utf-8"))
+    enc, header, rows = _read_csv_rows(p)
+    assert enc == "utf-8"
+    assert header == ["id", "note"]
+    assert rows == [["1", "a\nb"], ["2", "plain"]]

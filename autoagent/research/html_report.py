@@ -92,8 +92,14 @@ code{background:#f4f4f4;padding:.1rem .3rem;border-radius:3px}
 """.strip()
 
 
-def render_report_html(*, title: str, body_md: str) -> str:
-    """본문 markdown을 완결된 standalone HTML 문서로 만든다(인라인 CSS, 외부 리소스 0)."""
+def render_report_html(*, title: str, body_md: str, prepend_html: str = "") -> str:
+    """본문 markdown을 완결된 standalone HTML 문서로 만든다(인라인 CSS, 외부 리소스 0).
+
+    prepend_html은 markdown 변환을 거치지 않고 body 최상단에 그대로(unescaped) 삽입한다
+    — 코드가 생성한 신뢰된 인라인-CSS HTML(커버리지 배너/매트릭스)용 통로다([T28a]).
+    markdown_to_html._inline이 모든 텍스트를 html.escape()하기 때문에, 그 경로로 넘기면
+    실제 스타일 대신 escape된 소스 문자열(`&lt;div…&gt;`)이 그대로 보이는 문제를 피한다.
+    """
     body_html = markdown_to_html(body_md)
     safe_title = _html.escape(title)
     return (
@@ -103,6 +109,7 @@ def render_report_html(*, title: str, body_md: str) -> str:
         f"<title>{safe_title}</title>\n"
         f"<style>\n{_STYLE}\n</style>\n"
         "</head>\n<body>\n"
+        f"{prepend_html}\n"
         f"{body_html}\n"
         "</body>\n</html>\n"
     )

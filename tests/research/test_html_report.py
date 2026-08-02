@@ -60,6 +60,23 @@ def test_markdown_to_html_empty_input() -> None:
     assert markdown_to_html("") == ""
 
 
+def test_prepend_html_is_not_escaped() -> None:
+    # [T28a]: prepend_html은 markdown_to_html._inline(html.escape 경로)을 거치지 않고
+    # body 최상단에 그대로 박혀야 한다 — 커버리지 배너/매트릭스가 escape된 소스 문자열
+    # (`&lt;table…&gt;`)로 보이면 안 된다.
+    doc = render_report_html(
+        title="리서치 리포트", body_md="# 제목", prepend_html="<table><tr><td>x</td></tr></table>"
+    )
+    assert "<table><tr><td>x</td></tr></table>" in doc
+    assert "&lt;table" not in doc
+
+
+def test_prepend_html_defaults_to_empty() -> None:
+    # prepend_html 미지정이면 기존 동작(본문만) 그대로여야 한다(하위호환).
+    doc = render_report_html(title="리서치 리포트", body_md="# 제목")
+    assert "<h1>제목</h1>" in doc
+
+
 def _patch_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     # Path.home()을 tmp_path로 monkeypatch해 실제 ~/Desktop을 절대 건드리지 않는다.
     monkeypatch.setattr(Path, "home", lambda: tmp_path)

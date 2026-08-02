@@ -251,9 +251,16 @@ def _run_stage_d_verify(ctx: "ResearchContext", researcher_out: str, stage: str,
     sources_dir = ctx.run_dir / "sources"
     snaps = []
     for s in stage_out.get("sources", []):
+        # FIX 2(잔존 CF-2): http_status가 "200 OK" 같은 비숫자 문자열이면 int()가
+        # ValueError를 올려 budget try/except 밖에서 워크플로 전체를 크래시시킨다.
+        # grounding.py:84-87의 기존 가드와 동형으로 안전측(0) degrade한다.
+        try:
+            _hs = int(s.get("http_status") or 0)
+        except (TypeError, ValueError):
+            _hs = 0
         snaps.append(save_snapshot(
             sources_dir, s.get("ref_id") or "s?", s.get("url") or "", s.get("fetched_text") or "",
-            http_status=int(s.get("http_status") or 0), fetch_ts=s.get("fetch_ts"),
+            http_status=_hs, fetch_ts=s.get("fetch_ts"),
         ))
     write_sources_manifest(ctx.run_dir, snaps)
 
@@ -368,6 +375,10 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             ctx.stage_outputs[stage] = _truncate_capture(
                 researcher_out, getattr(ctx.config, "research_max_capture_chars", MAX_CAPTURE_CHARS)
             )
+            # FIX 1: stage_outputs는 in-memory 전용이라 --resume 시 재구성되지 않으면
+            # 최종 리포트가 "(없음)"으로 빈 채 렌더된다 — state에 미러링해 함께 영속한다.
+            ctx.state["stage_outputs"] = ctx.stage_outputs
+            _persist_state(ctx)
             return StageResult(
                 stage_id=stage, status="resolved",
                 output_path=f"stage_{stage}_p{outer_pass}_r{inner}_researcher.md",
@@ -375,6 +386,8 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             )
         if verdict.status == "blocked":
             ctx.stage_outputs[stage] = researcher_out
+            ctx.state["stage_outputs"] = ctx.stage_outputs
+            _persist_state(ctx)
             return StageResult(
                 stage_id=stage, status="blocked",
                 output_path=f"stage_{stage}_p{outer_pass}_r{inner}_researcher.md",
@@ -384,6 +397,8 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
 
     # 상한 도달, 미통과 → silent pass-through 금지: 명시적으로 미검증 표기.
     ctx.stage_outputs[stage] = ctx.stage_outputs.get(stage, "")
+    ctx.state["stage_outputs"] = ctx.stage_outputs
+    _persist_state(ctx)
     return StageResult(
         stage_id=stage, status="exhausted_unverified",
         output_path=f"stage_{stage}_p{outer_pass}_r{inner}_researcher.md",
@@ -392,7 +407,14 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
 
 
 def _coverage_matrix_md(results: list[StageResult]) -> str:
-    """스테이지별 verify_status 표(상단 강제). 100% 미만이면 경고 배너 문구를 앞에 붙인다."""
+    """스테이지별 verify_status 표(markdown 버전, 레거시).
+
+    [T28a] 최종리뷰 대응: 상단 강제 표시는 이제 render_coverage_matrix_html +
+    render_warning_banner_html을 prepend_html로 unescaped 주입하는 경로가 맡는다
+    (research.py의 run_research_workflow 참고). 이 함수는 run_research_workflow에서
+    더는 호출되지 않지만, 다른 코드/테스트가 향후 markdown 표 형태를 필요로 할 수 있어
+    삭제하지 않고 남겨둔다.
+    """
     status_map = {"resolved": "passed", "exhausted_unverified": "exhausted_unverified", "blocked": "blocked"}
     rows = "\n".join(f"| {r.stage_id} | {status_map.get(r.status, r.status)} |" for r in results)
     table = "| stage | verify_status |\n| --- | --- |\n" + rows
@@ -429,6 +451,10 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
             getattr(config, "research_per_stage_calls", 6), getattr(config, "research_per_outer_calls", 40)
         ),
     )
+    # FIX 1: --resume는 이미 resolved된 스테이지를 건너뛰므로(is_stage_done), 그 스테이지의
+    # 출력이 in-memory ctx.stage_outputs로 재구성될 기회가 없다 — 영속된 값을 복원해 최종
+    # 리포트가 "(없음)"으로 비지 않게 한다.
+    ctx.stage_outputs.update(state.get("stage_outputs", {}))
 
     # preamble: seed 확정 후 read-only pin(재개면 기존 pin 재사용, seed 스텝 스킵).
     if not state.get("seed_pin"):
@@ -518,13 +544,13 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
     matrix_html = render_coverage_matrix_html(stage_status_for_report, STAGE_ORDER, stage_labels=STAGE_LABELS)
     banner_html = render_warning_banner_html(summary)
     body_md = render_template("final_html_report.md", {
-        "COVERAGE_BANNER": banner_html, "COVERAGE_MATRIX": matrix_html,
-        "COVERAGE_MATRIX_MD": _coverage_matrix_md(stage_results),  # M3: 루프 앞 선초기화라 항상 바인딩됨
         "REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
         "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", "(없음)"),
         "DERIVE_OUTPUT": ctx.stage_outputs.get("derive", "(없음)"),
     })
-    html = render_report_html(title="리서치 리포트", body_md=body_md)
+    # FIX 3([T28a]): banner/matrix는 markdown_to_html._inline이 html.escape()하는 body_md
+    # 경로가 아니라 prepend_html로 넘겨 unescaped 그대로 상단에 박는다(§2.3 요구 충족).
+    html = render_report_html(title="리서치 리포트", body_md=body_md, prepend_html=banner_html + matrix_html)
     write_text(run_dir / "final_report.html", html)
     if args.dry_run:
         print(f"Research dry run written to {run_dir}")

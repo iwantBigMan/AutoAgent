@@ -145,3 +145,48 @@ def test_d_in_stage_adapter_and_prompt_maps() -> None:
     assert R.STAGE_ADAPTER["d"] == "source_grounding"
     assert R.STAGE_PROMPT["d"] == "d_fact_report.md"
     assert "d" not in R.MINIMAL_PATH  # Slice 4에서 바깥 루프에 합류(이 태스크 범위 아님)
+
+
+def test_d_stage_non_numeric_http_status_does_not_crash(tmp_path: Path, monkeypatch) -> None:
+    """FIX 2(잔존 CF-2): 소스의 http_status가 "200 OK" 같은 비숫자 문자열이어도
+    int() 변환 ValueError로 워크플로 전체가 크래시하지 않고 0으로 안전 degrade해야 한다.
+    """
+    researcher_out = (
+        "```json\n"
+        + json.dumps(
+            {
+                "stage_id": "d",
+                "report_md": "# 팩트리포트\n- Acme 매출은 12M이다 [s1]",
+                "claims": [
+                    {
+                        "id": "c1", "text": "Acme revenue was 12M.", "kind": "fact",
+                        "cited_source_refs": ["s1"], "quoted_span": "revenue of 12M",
+                    }
+                ],
+                "sources": [
+                    {
+                        "ref_id": "s1", "url": "https://example.com/acme",
+                        "http_status": "200 OK",  # 비숫자 문자열 — int() 직행이면 크래시
+                        "fetched_text": "In 2024 Acme reported revenue of 12M USD.",
+                        "fetch_ts": "2026-01-01T00:00:00Z",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n```\n"
+    )
+
+    def fake_agent_step(ctx, *, agent, role_id, name, prompt_name, prompt_values, next_step, dry_output):
+        if role_id == "verifier":
+            return _D_VERIFIER_PASS
+        return researcher_out
+
+    monkeypatch.setattr(R, "_run_agent_step", fake_agent_step)
+
+    ctx = _ctx(tmp_path)
+    result = R.run_stage_loop("d", outer_pass=1, ctx=ctx)  # 크래시 없이 끝까지 돌아야 함
+
+    manifest = json.loads((tmp_path / "sources_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["sources"][0]["http_status"] == 0  # 파싱 실패 → 안전측 0으로 degrade
+    assert result.status in {"resolved", "blocked", "exhausted_unverified"}  # 정상 종료(크래시 아님)
