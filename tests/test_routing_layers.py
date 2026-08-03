@@ -65,3 +65,32 @@ def test_frontend_pure_with_highrisk_term_no_phantom_backend():
 def test_docs_chosen_returns_empty():
     assert build_layers("docs", _scores(docs=1), "write readme", 0, 0, "auto") == []
     assert build_layers("review", _scores(), "review this", 0, 0, "auto") == []
+
+
+def test_route_task_auto_multilayer():
+    # 백+프론트 요청 → layers 두 개, 기존 task_type(주 레이어)도 유지.
+    from autoagent.routing import route_task
+    route = route_task("auto", "add a FastAPI endpoint and build a React page component")
+    assert [l["task_type"] for l in route["layers"]] == ["backend", "frontend"]
+    assert route["task_type"] in {"backend", "frontend"}  # 주 레이어 키 보존
+
+
+def test_route_task_auto_single_backend_layers():
+    # 백엔드만 신호 → [backend] 하나.
+    from autoagent.routing import route_task
+    route = route_task("auto", "add a database migration to the repository service")
+    assert [l["task_type"] for l in route["layers"]] == ["backend"]
+
+
+def test_route_task_docs_empty_layers():
+    # docs 라우팅 → layers 비어있음(구현 스텝 없음).
+    from autoagent.routing import route_task
+    route = route_task("auto", "write the readme documentation")
+    assert route["layers"] == []
+
+
+def test_route_task_explicit_is_single_layer():
+    # 명시 --task-type backend → 멀티검출 안 함, [backend]만.
+    from autoagent.routing import route_task
+    route = route_task("backend", "backend and a react page component and ui")
+    assert [l["task_type"] for l in route["layers"]] == ["backend"]

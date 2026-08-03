@@ -195,6 +195,16 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
         task_type=chosen,
     )
 
+    # 레이어 서브라우트 집합. 명시 task_type은 단일 레이어(멀티검출 안 함), auto만 멀티검출.
+    if task_type != "auto":
+        layers = (
+            [_make_layer(chosen, lowered, db_score, high_risk_score, requested_implementer)]
+            if chosen in {"backend", "frontend"}
+            else []
+        )
+    else:
+        layers = build_layers(chosen, scores, lowered, db_score, high_risk_score, requested_implementer)
+
     return {
         "task_type": chosen,
         "subtype": subtype,
@@ -207,6 +217,7 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
         "architect_agent": "claude",
         "evaluator_agent": "codex",
         "risk_level": risk_level,
+        "layers": layers,
     }
 
 
