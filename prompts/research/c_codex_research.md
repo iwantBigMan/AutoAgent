@@ -49,9 +49,18 @@ DATA_QUALITY_OUTPUT
   "transform_manifest": {"steps": [{"op": "dedup", "target_cols": ["id"], "params": {"dropped": 0}}]},
   "derived_claims": [{"id": "c1", "text": "설명", "backing_stat": {"metric": "sum", "value": 0, "col": "amt", "filter": {}}}],
   "schema_expectations": {"id": "int", "amt": "float"},
-  "sanity_rules": {"non_negative_cols": ["amt"], "unique_cols": ["id"]}
+  "sanity_rules": {"non_negative_cols": ["amt"], "unique_cols": ["id"],
+                   "range_cols": {"amt": [0, 100000]}, "future_date_cols": ["order_date"],
+                   "as_of_date": "2026-08-03"}
 }
 ```
+
+`sanity_rules` 스키마(모두 선택):
+- `non_negative_cols`: 음수면 위반인 열 목록.
+- `unique_cols`: 값이 유니크해야 하는 열 목록(중복=위반).
+- `range_cols`: `{"열이름": [min, max]}` — 값이 이 범위 밖이면 위반.
+- `future_date_cols`: ISO 날짜(`YYYY-MM-DD`) 열 목록 — `as_of_date` 이후면 위반.
+- `as_of_date`: 미래날짜 판정 기준일(ISO). 미지정 시 코드 실행 시점의 오늘 날짜를 씀.
 
 # 자체 리뷰
 산출을 마치기 전, manifest의 dropped 합이 (원본 행수 − 정제 행수)와 정확히 같은지,

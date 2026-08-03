@@ -107,3 +107,59 @@ def test_sanity_duplicate_key_flags(tmp_path: Path) -> None:
     checks, findings = check_sanity(cln, {"unique_cols": ["id"]})
     assert any(c["status"] == "fail" and "id" in c.get("col", "") for c in checks)
     assert any("id" in f.detail for f in findings)
+
+
+def test_sanity_out_of_range_flags(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,amt\n1,100\n2,999999\n"))
+    checks, findings = check_sanity(cln, {"range_cols": {"amt": [0, 1000]}})
+    check = next(c for c in checks if c["name"] == "range[amt]")
+    assert check["status"] == "fail"
+    assert check["metric_actual"] == 1
+    assert any(f.category == "out_of_range" and "amt" in f.detail for f in findings)
+
+
+def test_sanity_in_range_passes_no_finding(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,amt\n1,100\n2,200\n"))
+    checks, findings = check_sanity(cln, {"range_cols": {"amt": [0, 1000]}})
+    check = next(c for c in checks if c["name"] == "range[amt]")
+    assert check["status"] == "pass"
+    assert findings == []
+
+
+def test_sanity_range_malformed_bounds_skipped_no_crash(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,amt\n1,100\n2,200\n"))
+    checks, findings = check_sanity(cln, {"range_cols": {"amt": [0]}})
+    assert not any(c["name"] == "range[amt]" for c in checks)
+    assert findings == []
+
+
+def test_sanity_future_date_flags(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,order_date\n1,2026-08-01\n2,2026-08-10\n"))
+    checks, findings = check_sanity(
+        cln, {"future_date_cols": ["order_date"], "as_of_date": "2026-08-03"},
+    )
+    check = next(c for c in checks if c["name"] == "future_date[order_date]")
+    assert check["status"] == "fail"
+    assert check["metric_actual"] == 1
+    assert any(f.category == "future_date" and "order_date" in f.detail for f in findings)
+
+
+def test_sanity_date_on_or_before_reference_passes(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,order_date\n1,2026-08-03\n2,2026-08-01\n"))
+    checks, findings = check_sanity(
+        cln, {"future_date_cols": ["order_date"], "as_of_date": "2026-08-03"},
+    )
+    check = next(c for c in checks if c["name"] == "future_date[order_date]")
+    assert check["status"] == "pass"
+    assert findings == []
+
+
+def test_sanity_unparseable_date_skipped_not_counted(tmp_path: Path) -> None:
+    cln = validate_csv(_w(tmp_path, "c.csv", "id,order_date\n1,not-a-date\n2,2026-08-01\n"))
+    checks, findings = check_sanity(
+        cln, {"future_date_cols": ["order_date"], "as_of_date": "2026-08-03"},
+    )
+    check = next(c for c in checks if c["name"] == "future_date[order_date]")
+    assert check["status"] == "pass"
+    assert check["metric_actual"] == 0
+    assert findings == []

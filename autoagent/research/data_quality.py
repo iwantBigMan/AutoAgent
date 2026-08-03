@@ -12,6 +12,7 @@ tolerance는 metric kind별로 코드가 고정한다(합계·행수=정확일�
 """
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -216,7 +217,8 @@ def check_schema(
 def check_sanity(
     cleaned_metrics: CSVQualityMetrics, sanity_rules: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[Finding]]:
-    """상식 위반 탐지: 음수 금지 열(non_negative_cols), 유니크 키(unique_cols)."""
+    """상식 위반 탐지: 음수매출(non_negative_cols)·중복키(unique_cols)·
+    범위이탈(range_cols)·미래날짜(future_date_cols)."""
     checks: list[dict[str, Any]] = []
     findings: list[Finding] = []
     _header, records = _load_records(Path(cleaned_metrics.path))
@@ -257,6 +259,61 @@ def check_sanity(
                 severity="major", category="duplicate_key",
                 detail=f"unique column '{col}' has {dups} duplicate key(s)",
                 fix_directive=f"'{col}'의 중복 키를 dedup하거나 유니크 가정을 수정하세요.",
+            ))
+
+    # 범위이탈(§4.2): range_cols = {col: [min, max]}. 값이 [min,max] 밖이면 위반.
+    for col, bounds in (sanity_rules.get("range_cols", {}) or {}).items():
+        try:
+            lo, hi = float(bounds[0]), float(bounds[1])
+        except (TypeError, ValueError, IndexError, KeyError):
+            continue  # 잘못된 범위 지정은 조용한 crash 없이 스킵
+        bad = 0
+        for r in records:
+            try:
+                v = float(r.get(col, ""))
+            except (TypeError, ValueError):
+                continue  # 수치 아님은 범위 판정 대상 아님(스키마 체크가 별도로 잡음)
+            if v < lo or v > hi:
+                bad += 1
+        status = "fail" if bad else "pass"
+        checks.append({"name": f"range[{col}]", "status": status, "col": col,
+                       "metric_expected": 0, "metric_actual": bad,
+                       "detail": f"{bad} out-of-range values (allowed [{lo}, {hi}])"})
+        if bad:
+            findings.append(Finding(
+                severity="major", category="out_of_range",
+                detail=f"column '{col}' has {bad} value(s) outside [{lo}, {hi}]",
+                fix_directive=f"'{col}'의 범위 이탈 값을 조사·정정하세요(허용 범위 [{lo}, {hi}]).",
+            ))
+
+    # 미래날짜(§4.2): future_date_cols의 ISO 날짜가 기준일 이후면 위반.
+    # 기준일 = sanity_rules['as_of_date'](ISO), 없으면 오늘(라이브만; 테스트는 항상 as_of_date를 준다).
+    _as_of = sanity_rules.get("as_of_date")
+    try:
+        reference = datetime.date.fromisoformat(_as_of) if _as_of else datetime.date.today()
+    except (TypeError, ValueError):
+        reference = datetime.date.today()
+    for col in sanity_rules.get("future_date_cols", []) or []:
+        bad = 0
+        for r in records:
+            raw = str(r.get(col, "")).strip()
+            if not raw:
+                continue
+            try:
+                d = datetime.date.fromisoformat(raw[:10])  # ISO YYYY-MM-DD (앞 10자만)
+            except (TypeError, ValueError):
+                continue  # 파싱 불가한 값은 미래날짜 대상 아님
+            if d > reference:
+                bad += 1
+        status = "fail" if bad else "pass"
+        checks.append({"name": f"future_date[{col}]", "status": status, "col": col,
+                       "metric_expected": 0, "metric_actual": bad,
+                       "detail": f"{bad} future dates (after {reference.isoformat()})"})
+        if bad:
+            findings.append(Finding(
+                severity="major", category="future_date",
+                detail=f"column '{col}' has {bad} date(s) after reference {reference.isoformat()}",
+                fix_directive=f"'{col}'의 미래 날짜를 조사하세요(기준일 {reference.isoformat()} 이후 = 데이터 오류 가능).",
             ))
     return checks, findings
 
