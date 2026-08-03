@@ -54,7 +54,7 @@ backend로 하드 오버라이드**하고 risk를 high로 올린다(routing.py:1
 | `routed.run_routed_workflow` (수정) | 코드-레이어 분기를 `route["layers"]` 기반으로 | route |
 | `routed_impl.run_implementation_route` (수정) | `route["layers"]` 순차 순회 + 레이어별 사이클 + 커버리지 게이트 호출 + eval/report 1회 | route, 게이트 |
 | `routed_common.coverage_gate` (신규) | 기대 레이어 vs 구현된 레이어 대조 → forced 정지 판정 | route |
-| final 프롬프트(커버리지 섹션) | 리포트에 레이어 커버리지 요약 표기 | — |
+| `routed_impl`(리포트 커버리지 prepend) | `final_report.md`에 레이어 커버리지 배너를 코드측에서 prepend | — |
 
 ### 1. `build_layers` — 레이어 검출 (순수·결정론)
 
@@ -68,13 +68,16 @@ def build_layers(
     """주 레이어 위에 부 코드 레이어를 얹어 순서 있는 서브라우트 리스트를 만든다.
 
     - docs/review(chosen이 코드 아님) → [] (구현 스텝 없음).
-    - 코드 레이어면 집합 = {chosen} ∪ {임계 넘은 반대 코드 레이어}.
+    - 코드 레이어면 집합 = {chosen} ∪ {backend if backend_score>=1} ∪ {frontend if frontend_score>=2}.
     - 임계: backend >= 1, frontend >= 2 (routing.py:174 anti-flip 규칙과 동일).
-    - db_score>0 또는 high_risk_score>0이면 backend를 집합에 보장 포함(축소 금지).
+    - **축소 금지는 재추가로 달성**: route_task의 db override가 chosen을 backend로 바꿔도(기존 동작
+      유지) scores.frontend는 그대로라 frontend가 >=2면 여기서 다시 들어온다 → 프론트 복구.
+      backend 강제 포함(force-add)은 두지 않는다 — high_risk_score는 chosen을 바꾸지 않으므로
+      순수-프론트 요청(예: "React payment page")에 허깨비 backend 레이어를 만들지 않기 위함.
     - 순서: 항상 backend 먼저, frontend 나중.
     - 각 원소: {task_type, subtype, risk_level, implementation_agent, review_agent}.
-      subtype/risk는 레이어별로 계산(backend는 기존 subtype 로직, frontend는 ui/medium).
-      high-risk/DB는 backend 레이어의 risk_level만 high로 상향.
+      subtype/risk는 레이어별 `_layer_subtype_risk`로 계산(backend는 기존 subtype 로직 + high_risk/DB면
+      risk=high, frontend는 항상 ui/medium). → high-risk/DB는 backend 레이어의 risk만 올린다.
     """
 ```
 
@@ -83,6 +86,13 @@ def build_layers(
 - 어떤 신호도 집합을 축소하지 않는다(오버라이드는 추가/상향만).
 - `chosen`이 docs/review면 항상 `[]`.
 - 단일 코드 레이어 요청은 정확히 `[chosen 레이어]` 하나 → **기존 동작과 바이트 동형**.
+
+**직교하는 공유 안전망(무변경):** `resolve_role`의 `_is_high_risk`는 route.risk_level/subtype
+**외에** 요청 텍스트의 `HIGH_RISK_REQUEST_TERMS`(migration/auth/payment/production/backfill/rollback)도
+스캔한다(`routed_common.is_high_risk`, 승인 게이트와 공유). 따라서 db_score/high_risk_score 축(라우팅
+오버라이드)은 이 설계로 backend 레이어에만 국한되지만, **요청 문장 자체에 저 6개 단어가 있으면** frontend
+레이어도 함께 deep로 승격될 수 있다. 이는 의도된 기존 안전망이라 이번 범위에서 변경하지 않는다(같은
+함수를 승인 게이트도 씀). 이번 설계가 고치는 것은 "라우팅 오버라이드로 인한 프론트 실종/승격"이다.
 
 ### 2. `route_task` 확장
 
@@ -136,9 +146,14 @@ if missing: return coverage_gate(run_dir, route, missing)   # forced 정지
 
 ### 6. 리포트 커버리지 표기
 
-final 프롬프트(`prompts/routed/final/*`)에 "요청이 요구한 레이어(route.layers) vs
-구현된 레이어" 요약 섹션을 넣는다. 게이트를 통과했으면 100%. 리서치 커버리지 매트릭스와
-톤 맞추되 별도 대형 HTML은 만들지 않고 기존 final 산출물에 한 섹션만 추가한다.
+**공유 프롬프트 템플릿은 건드리지 않는다.** `claude_final.md`/`codex_final.md`는 decompose
+실행기(`task_exec`)도 렌더하므로 새 `{LAYER_COVERAGE}` placeholder를 넣으면 그쪽에서 KeyError가
+난다. 대신 research의 커버리지 prepend와 동형으로 **코드측에서** 처리한다:
+- `run_implementation_route`가 "요청이 요구한 레이어(route.layers) vs 구현된 레이어" 요약
+  마크다운 배너를 만들어 모델이 낸 `final` 앞에 prepend한 뒤 `final_report.md`로 쓴다.
+- 게이트를 통과했으면 100%(모든 레이어 구현됨) 배너, 아니면 애초에 게이트에서 정지했으므로
+  final 단계에 도달하지 않는다.
+- dry-run에서도 prepend가 적용되어 `final_report.md`에 배너가 보인다(검증 가능).
 
 ## 데이터 흐름
 
