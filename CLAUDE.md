@@ -17,8 +17,13 @@ cross-model implement/review with human approval gates. Full reference: `README.
 - **역할 분업(고정)**: auto 라우팅에서 모든 구현(backend·frontend)은 **Codex**, 모든 리뷰(라운드 05 + 최종 07)는 반대편 **Claude**가 맡는다. 계획(context·architect)·최종보고는 Claude, 계획검증·평가(08)는 Codex. high-risk backend 구현은 codex `deep` 티어(effort high). Codex 구현자는 결과 전 자기 diff를 자체 리뷰(`SELF_REVIEW`)한다.
 
 ## Workflows & layout
-- `--workflow simple|routed|decompose`; routed = context→architecture⇄validation→
+- `--workflow simple|routed|decompose|research`; routed = context→architecture⇄validation→
   approval gate→implement→review⇄fix→eval→report.
+- `research` = 영업/데이터 리서치(회사·시장·CSV정제·웹팩트리포트→도출): 중첩 루프(안쪽 리서치→검증→보정 ×3,
+  바깥 심화 ×2) + 교차모델 적대검증(어댑터 crossmodel/data_quality/source_grounding) + 게이트·재개 + 인용 HTML
+  리포트. 코어 `autoagent/research/**`·`autoagent/data/**`, 오케스트레이터 `autoagent/workflows/research.py`,
+  프롬프트 `prompts/research/*.md`. 설계 문서: `docs/superpowers/specs|plans/*research*`. 실행: `/aar` 또는
+  `run.py --workflow research --request "..."` (+`--auto-approve-nonbranch`/`--resume`).
 - `autoagent/workflows/routed_*.py` split by phase: `routed_preamble` (plan),
   `routed_impl` (implement/review loop), `routed_docs` (read-only), `routed_common` (gates),
   plus `task_exec.py` (decompose's parallel executor).
@@ -30,10 +35,13 @@ cross-model implement/review with human approval gates. Full reference: `README.
 - Run artifacts land in `runs/YYYYMMDD_HHMMSS/` (gitignored except `.gitkeep`).
 
 ## Testing / verification
-- **No test suite.** Verify with dry-run:
+- **routed/decompose = no unit tests** → verify with dry-run:
   `python .\run.py --dry-run --workflow routed --task-type backend --request "..."`
-  — renders every prompt + `*_command.json` without invoking any CLI. Dry-run never
-  counts against `--max-agent-calls`.
+  (renders every prompt + `*_command.json`, no CLI invoked; dry-run never counts against `--max-agent-calls`).
+- **`research` subsystem HAS a deterministic pytest suite** (`autoagent/research/**`·`autoagent/data/**`, pytest.ini):
+  `python -m pytest tests/ -q` (~171 tests). 모델 호출부는 여전히 dry-run으로:
+  `python run.py --dry-run --workflow research --request "..."` (a→b→c→d→derive 전 스테이지 순회 후 exit 0).
+- 리서치 워크플로는 **pytest + dry-run까지만 검증** — 실모델 라이브 런 미실증(사용자 인계). "구현됨"을 "실전 검증됨"으로 단정 말 것.
 
 ## Conventions
 - Every module opens with a **Korean docstring**; functions carry Korean inline comments.
