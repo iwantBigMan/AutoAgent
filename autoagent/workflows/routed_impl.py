@@ -6,6 +6,7 @@ high-risk backend 구현/수정은 codex의 deep 티어(effort high)로 수행�
 """
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,14 @@ from autoagent.roles import ResolvedRole, load_roles, resolve_role
 from autoagent.runner import AgentCallBudget, claude_command, codex_exec_command, require_command, run_process, write_command_artifact
 from autoagent.safety import review_needs_changes
 from autoagent.verification import run_verification_or_skip
-from autoagent.workflows.routed_common import run_evaluation, run_final_report, stop_after
+from autoagent.workflows.routed_common import (
+    coverage_banner_md,
+    coverage_gate,
+    missing_layers,
+    run_evaluation,
+    run_final_report,
+    stop_after,
+)
 
 
 def run_impl_review_fix(
@@ -118,34 +126,83 @@ def run_implementation_route(
     budget: AgentCallBudget,
     run_dir: Path,
 ) -> int:
-    # 구현->리뷰/수정 코어를 헬퍼로 돌리고, 헬퍼가 실제로 정지했을 때만 꼬리를 건너뛴다.
-    implementation, review, fix, resolved, stopped = run_impl_review_fix(
-        args=args,
-        config=config,
-        common=common,
-        route=route,
-        request=request,
-        budget=budget,
-        run_dir=run_dir,
-    )
-    if stopped:
-        return 0
+    """route["layers"]를 순차 순회하며 레이어별 impl→리뷰/수정 사이클을 돌린다.
 
-    # 1단계 검증 스테이지(구현/수정 뒤, 최종리뷰 전): DB-free 커맨드를 실제 실행하고
-    # 그 결과를 최종리뷰/평가/보고가 볼 수 있도록 implementation 문자열에 덧붙인다.
-    # 공유 프롬프트 템플릿은 건드리지 않아 동시 실행 중인 다른 런에 영향을 주지 않는다.
+    각 레이어는 effective route(task_type/subtype/risk/agents를 레이어값으로)와 layer_common
+    (TASK_TYPE/ROUTE_JSON을 레이어값으로)으로 기존 run_impl_review_fix를 그대로 태운다.
+    루프 후 forced 커버리지 게이트로 누락을 차단하고, 검증/최종리뷰/평가/보고는 1회만 수행한다.
+    단일 레이어면 집계가 항등이라 기존 동작과 바이트 동형이다.
+    """
+    layers = route.get("layers") or []
+    raw_impls: list[str] = []
+    implemented: list[str] = []
+    last_review = "Review skipped (max_review_rounds=0)."
+    last_fix = "No fix step was run."
+    all_resolved = True
+
+    for layer in layers:
+        # 레이어별 effective route: task_type/subtype/risk/agents를 이 레이어값으로 덮는다.
+        effective_route = {
+            **route,
+            "task_type": layer["task_type"],
+            "subtype": layer["subtype"],
+            "risk_level": layer["risk_level"],
+            "implementation_agent": layer["implementation_agent"],
+            "review_agent": layer["review_agent"],
+        }
+        # 프롬프트 값도 이 레이어에 맞춘다(TASK_TYPE/ROUTE_JSON이 프롬프트 본문에 노출될 수 있음).
+        layer_common = {
+            **common,
+            "TASK_TYPE": layer["task_type"],
+            "ROUTE_JSON": json.dumps(effective_route, ensure_ascii=False, indent=2),
+        }
+        implementation, review, fix, resolved, stopped = run_impl_review_fix(
+            args=args,
+            config=config,
+            common=layer_common,
+            route=effective_route,
+            request=request,
+            budget=budget,
+            run_dir=run_dir,
+        )
+        if stopped:
+            return 0
+        raw_impls.append(implementation)
+        implemented.append(layer["task_type"])
+        last_review, last_fix = review, fix
+        all_resolved = all_resolved and resolved
+        write_text(
+            run_dir / f"review_loop_status_{layer['task_type']}.md",
+            f"layer: {layer['task_type']}\n"
+            f"resolved: {str(resolved).lower()}\n"
+            f"rounds_configured: {max(args.max_review_rounds, 0)}\n",
+        )
+
+    # forced 커버리지 게이트: 요구한 레이어가 모두 구현됐는가.
+    missing = missing_layers(route, implemented)
+    if missing:
+        return coverage_gate(run_dir, route, missing)
+
+    # 집계 구현본. 단일 레이어면 항등(바이트 동형), 다중이면 레이어 헤더로 결합.
+    if len(raw_impls) == 1:
+        implementation = raw_impls[0]
+    else:
+        implementation = "\n\n---\n\n".join(
+            f"## Layer: {task_type}\n\n{body}" for task_type, body in zip(implemented, raw_impls)
+        )
+    review, fix = last_review, last_fix
+
+    # 1단계 검증 스테이지(구현/수정 뒤, 최종리뷰 전).
     implementation = _maybe_run_verification(args, config, run_dir, implementation)
     if stop_after(args, run_dir, "verification"):
         return 0
 
-    # 이후 최종리뷰/평가/보고는 최신 반영본 기준으로 진행한다.
     write_text(
         run_dir / "review_loop_status.md",
-        f"resolved: {str(resolved).lower()}\n"
+        f"resolved: {str(all_resolved).lower()}\n"
         f"rounds_configured: {max(args.max_review_rounds, 0)}\n",
     )
 
-    # 최종리뷰(07)는 routed와 실행기가 공유하는 헬퍼로 수행한다(DRY). stop_after는 호출부에 둔다.
     final_review = run_final_review(
         args=args,
         config=config,
@@ -162,34 +219,21 @@ def run_implementation_route(
         return 0
 
     evaluation = run_evaluation(
-        args,
-        config,
-        common,
-        budget,
-        run_dir,
+        args, config, common, budget, run_dir,
         name="08_codex_evaluation",
-        implementation=implementation,
-        review=review,
-        fix=fix,
-        final_review=final_review,
+        implementation=implementation, review=review, fix=fix, final_review=final_review,
     )
     if stop_after(args, run_dir, "evaluation"):
         return 0
 
     final = run_final_report(
-        args,
-        config,
-        common,
-        budget,
-        run_dir,
+        args, config, common, budget, run_dir,
         name="09_claude_final_report",
-        implementation=implementation,
-        review=review,
-        fix=fix,
-        final_review=final_review,
-        evaluation=evaluation,
+        implementation=implementation, review=review, fix=fix,
+        final_review=final_review, evaluation=evaluation,
     )
-    write_text(run_dir / "final_report.md", final)
+    # 리포트 커버리지 배너를 코드측에서 prepend(공유 템플릿 무변경).
+    write_text(run_dir / "final_report.md", coverage_banner_md(route, implemented) + final)
     stop_after(args, run_dir, "report")
     print(f"Routed run complete: {run_dir}")
     return 0
