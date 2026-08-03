@@ -14,6 +14,7 @@ from pathlib import Path
 from autoagent.artifacts import DEFAULT_CONFIG, ensure_project_config, make_run_dir, read_text, write_metadata, write_text
 from autoagent.config import load_config
 from autoagent.workflows.decompose import run_decompose_workflow
+from autoagent.workflows.research import run_research_workflow
 from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
 from autoagent.workflows.simple import run_simple_workflow
 from autoagent.workflows.task_exec import run_task_graph_execution
@@ -50,7 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to config JSON")
     parser.add_argument("--project", help="Project registry name under projects/<name>/ (config + runs)")
     parser.add_argument("--workspace", help="Override target workspace path")
-    parser.add_argument("--workflow", choices=["simple", "routed", "decompose"], default="simple", help="Workflow to run")
+    parser.add_argument("--workflow", choices=["simple", "routed", "decompose", "research"], default="simple", help="Workflow to run")
     parser.add_argument(
         "--task-type",
         choices=["auto", "backend", "frontend", "docs", "review"],
@@ -97,6 +98,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-review", action="store_true", help="Skip final Claude review")
     parser.add_argument("--dry-run", action="store_true", help="Render prompts without calling CLIs")
     parser.add_argument(
+        "--auto-approve-nonbranch", action="store_true",
+        help="Research workflow: auto-pass non-branch gates (never skips forced high-cost/contradiction/blocked gates)",
+    )
+    parser.add_argument(
         "--resume",
         help="Resume a gated routed run from its run directory; loads checkpoint.json and continues into implementation",
     )
@@ -128,6 +133,8 @@ def main() -> int:
         run_dir = Path(args.resume)
         # 재개 run의 run_dir 밑에 Claude용 MCP config 생성(dry-run이면 경로만, 파일 미기록).
         config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
+        if (run_dir / "research_state.json").exists():
+            return run_research_workflow(args, config, None, run_dir)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
             return run_task_graph_execution(args, config, run_dir)
@@ -176,4 +183,6 @@ def main() -> int:
         return run_routed_workflow(args, config, request, run_dir)
     if args.workflow == "decompose":
         return run_decompose_workflow(args, config, request, run_dir)
+    if args.workflow == "research":
+        return run_research_workflow(args, config, request, run_dir)
     return run_simple_workflow(args, config, request, run_dir)
