@@ -68,7 +68,7 @@ def run_routed_workflow(args: Namespace, config: Config, request: str, run_dir: 
             if not ok:
                 return block_implementation(run_dir, git_message)
 
-        if route["task_type"] in {"backend", "frontend"}:
+        if route["layers"]:
             return run_implementation_route(args, config, common, route, request, budget, run_dir)
     except AgentCallBudgetStopped as stopped:
         print(f"Routed run stopped by budget before {stopped.next_step}: {run_dir}")

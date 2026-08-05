@@ -188,35 +188,22 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
         if high_risk_score > 0:
             reason = f"{reason} High-risk keywords matched: {high_risk_score}."
 
-    if chosen == "backend":
-        if db_score > 0:
-            subtype = "db"
-            risk_level = "high"
-        elif any(term in lowered for term in ["api", "fastapi", "endpoint", "route"]):
-            subtype = "api"
-            risk_level = "medium"
-        elif any(term in lowered for term in ["service", "repository", "business logic"]):
-            subtype = "service"
-            risk_level = "medium"
-        elif any(term in lowered for term in ["infra", "config", "deploy", "worker"]):
-            subtype = "infra"
-            risk_level = "medium"
-        else:
-            subtype = "general"
-            risk_level = "medium"
-        if high_risk_score > 0:
-            risk_level = "high"
-    elif chosen == "frontend":
-        subtype = "ui"
-        risk_level = "medium"
-    else:
-        subtype = "review" if chosen == "review" else "docs"
-        risk_level = "low"
+    subtype, risk_level = _layer_subtype_risk(chosen, lowered, db_score, high_risk_score)
 
     implementation_agent, review_agent, implementer_reason = choose_implementer(
         requested_implementer=requested_implementer,
         task_type=chosen,
     )
+
+    # 레이어 서브라우트 집합. 명시 task_type은 단일 레이어(멀티검출 안 함), auto만 멀티검출.
+    if task_type != "auto":
+        layers = (
+            [_make_layer(chosen, lowered, db_score, high_risk_score, requested_implementer)]
+            if chosen in {"backend", "frontend"}
+            else []
+        )
+    else:
+        layers = build_layers(chosen, scores, lowered, db_score, high_risk_score, requested_implementer)
 
     return {
         "task_type": chosen,
@@ -230,6 +217,7 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
         "architect_agent": "claude",
         "evaluator_agent": "codex",
         "risk_level": risk_level,
+        "layers": layers,
     }
 
 
@@ -254,6 +242,79 @@ def choose_implementer(
         return "claude", "codex", "Docs/review routes have no implementation step."
 
     return "claude", "codex", "Fallback implementer selection."
+
+
+def _layer_subtype_risk(task_type: str, lowered: str, db_score: int, high_risk_score: int) -> tuple[str, str]:
+    """레이어(task_type)별 (subtype, risk_level)을 계산한다. route_task 인라인 로직과 동형.
+
+    backend: db>api>service>infra>general 순으로 subtype 결정, high_risk_score>0면 risk=high로 상향.
+    frontend: 항상 (ui, medium). docs/review: (docs|review, low).
+    """
+    if task_type == "backend":
+        if db_score > 0:
+            subtype, risk_level = "db", "high"
+        elif any(t in lowered for t in ["api", "fastapi", "endpoint", "route"]):
+            subtype, risk_level = "api", "medium"
+        elif any(t in lowered for t in ["service", "repository", "business logic"]):
+            subtype, risk_level = "service", "medium"
+        elif any(t in lowered for t in ["infra", "config", "deploy", "worker"]):
+            subtype, risk_level = "infra", "medium"
+        else:
+            subtype, risk_level = "general", "medium"
+        if high_risk_score > 0:
+            risk_level = "high"
+        return subtype, risk_level
+    if task_type == "frontend":
+        return "ui", "medium"
+    return ("review" if task_type == "review" else "docs"), "low"
+
+
+def _make_layer(
+    task_type: str, lowered: str, db_score: int, high_risk_score: int, requested_implementer: str
+) -> dict[str, Any]:
+    """단일 레이어 서브라우트 dict를 만든다(subtype/risk + 구현자/리뷰어 배정)."""
+    subtype, risk_level = _layer_subtype_risk(task_type, lowered, db_score, high_risk_score)
+    impl_agent, review_agent, _reason = choose_implementer(
+        requested_implementer=requested_implementer, task_type=task_type
+    )
+    return {
+        "task_type": task_type,
+        "subtype": subtype,
+        "risk_level": risk_level,
+        "implementation_agent": impl_agent,
+        "review_agent": review_agent,
+    }
+
+
+def build_layers(
+    chosen: str,
+    scores: dict[str, int],
+    lowered: str,
+    db_score: int,
+    high_risk_score: int,
+    requested_implementer: str,
+) -> list[dict[str, Any]]:
+    """주 레이어(chosen) 위에 임계를 넘은 코드 레이어를 얹어 순서 있는 서브라우트 리스트를 만든다.
+
+    - chosen이 코드 레이어(backend/frontend)가 아니면 [](구현 스텝 없음).
+    - 집합 = {chosen} ∪ {backend if backend>=1} ∪ {frontend if frontend>=2}.
+    - 축소 금지는 재추가로 달성: route_task의 db override가 chosen=backend로 바꿔도 scores.frontend는
+      그대로라 frontend>=2면 여기서 복구된다. high_risk_score는 chosen을 안 바꾸므로 순수-프론트
+      요청에 허깨비 backend를 만들지 않기 위해 force-add는 두지 않는다.
+    - 순서 고정: backend 먼저, frontend 나중.
+    """
+    if chosen not in {"backend", "frontend"}:
+        return []
+    selected = {chosen}
+    if scores.get("backend", 0) >= 1:
+        selected.add("backend")
+    if scores.get("frontend", 0) >= 2:
+        selected.add("frontend")
+    return [
+        _make_layer(task_type, lowered, db_score, high_risk_score, requested_implementer)
+        for task_type in ("backend", "frontend")  # 순서 고정
+        if task_type in selected
+    ]
 
 
 # 스테이지별 리서처 배정(스펙 §3). 웹 리서치는 전부 Claude, CSV 정제(c)만 Codex.

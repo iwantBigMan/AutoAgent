@@ -247,3 +247,60 @@ def stop_after(args: Namespace, run_dir: Path, stage: str) -> bool:
     )
     print(f"Routed run stopped after {stage}: {run_dir}")
     return True
+
+
+def missing_layers(route: dict[str, Any], implemented: list[str]) -> list[str]:
+    """route.layers가 요구한 task_type 중 implemented에 없는 것들(요구 순서 보존)."""
+    expected = [layer["task_type"] for layer in (route.get("layers") or [])]
+    done = set(implemented)
+    return [task_type for task_type in expected if task_type not in done]
+
+
+def coverage_banner_md(route: dict[str, Any], implemented: list[str]) -> str:
+    """final_report.md 상단에 prepend할 레이어 커버리지 배너(markdown). layers 없으면 빈 문자열."""
+    expected = [layer["task_type"] for layer in (route.get("layers") or [])]
+    if not expected:
+        return ""
+    missing = missing_layers(route, implemented)
+    pct = round(len(implemented) / len(expected) * 100)
+    status = "✅ 전 레이어 구현됨" if not missing else f"⚠ 미구현: {', '.join(missing)}"
+    return (
+        f"> **레이어 커버리지 {pct}%** — 요구: {', '.join(expected)} / "
+        f"구현: {', '.join(implemented) or '없음'}. {status}\n\n"
+    )
+
+
+def coverage_gate(run_dir: Path, route: dict[str, Any], missing: list[str]) -> int:
+    """미구현 레이어가 있을 때 forced 정지. coverage_status.json 기록 + stdout 핸드오프.
+
+    승인/재개로 우회 불가한 forced 게이트 — 라우팅이 요구한 레이어가 실제로 안 돌았다는 건
+    진짜 버그 신호이므로 사람이 입력/요청을 손봐야 한다(resume_command을 제공하지 않는다).
+    """
+    expected = [layer["task_type"] for layer in (route.get("layers") or [])]
+    missing_set = set(missing)
+    implemented = [task_type for task_type in expected if task_type not in missing_set]
+    reason = f"라우팅이 요구한 레이어 중 미구현: {', '.join(missing)}. 조용한 누락 대신 게이트에서 정지."
+    write_json(
+        run_dir / "coverage_status.json",
+        {
+            "status": "blocked",
+            "kind": "layer_coverage",
+            "expected": expected,
+            "implemented": implemented,
+            "missing": missing,
+            "reason": reason,
+            "run_dir": str(run_dir),
+        },
+    )
+    write_text(
+        run_dir / "final_report.md",
+        "# Layer Coverage Blocked\n\n"
+        f"{reason}\n\n"
+        f"- 요구 레이어: {', '.join(expected)}\n"
+        f"- 구현됨: {', '.join(implemented) or '없음'}\n"
+        f"- 미구현: {', '.join(missing)}\n",
+    )
+    print("ROUTED_STATUS: blocked_layer_coverage")
+    print(f"RUN_DIR: {run_dir}")
+    print(f"Routed run blocked on layer coverage: {run_dir}")
+    return 0
