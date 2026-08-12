@@ -120,3 +120,13 @@ def test_preamble_solo_review_prepends(tmp_path):
     assert out.endswith("BODY")
     assert "적대적 리뷰 지침" in out
     assert out != "BODY"
+
+
+def test_solo_banner_is_cp949_encodable():
+    # 시작 배너는 Windows cp949 stdout에서도 크래시하지 않아야 한다(비-cp949 문자 금지).
+    from autoagent.cli import solo_banner
+
+    for provider in ("claude", "codex"):
+        banner = solo_banner(provider)
+        assert provider in banner
+        banner.encode("cp949")  # UnicodeEncodeError면 실패
