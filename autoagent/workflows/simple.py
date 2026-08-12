@@ -17,7 +17,9 @@ from autoagent.runner import (
     codex_exec_command,
     require_command,
     run_process,
+    solo_command,
     write_command_artifact,
+    solo_cli,
 )
 
 
@@ -31,7 +33,12 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
 
     if args.dry_run:
         write_text(run_dir / "01_plan_prompt.md", plan_prompt)
-        write_command_artifact(run_dir, "01_claude_plan", claude_command(config.claude_command, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path))
+        cmd01 = (
+            solo_command(config, intent="plan", resolved_command=solo_cli(config))
+            if config.solo_provider else
+            claude_command(config.claude_command, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path)
+        )
+        write_command_artifact(run_dir, "01_claude_plan", cmd01)
         print(f"Dry run written to {run_dir}")
         return 0
 
@@ -42,7 +49,11 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         budget.before_call(next_step="plan", out_dir=run_dir, dry_run=args.dry_run)
         plan = run_process(
             name="01_claude_plan",
-            command=claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
+            command=(
+                solo_command(config, intent="plan", resolved_command=require_command(solo_cli(config)))
+                if config.solo_provider else
+                claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path)
+            ),
             prompt=plan_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -65,7 +76,11 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         budget.before_call(next_step="execute", out_dir=run_dir, dry_run=args.dry_run)
         codex_result = run_process(
             name="02_codex_execute",
-            command=codex_exec_command(config, codex, config.codex_sandbox),
+            command=(
+                solo_command(config, intent="execute", resolved_command=require_command(solo_cli(config)))
+                if config.solo_provider else
+                codex_exec_command(config, codex, config.codex_sandbox)
+            ),
             prompt=execute_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -89,7 +104,11 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         budget.before_call(next_step="review", out_dir=run_dir, dry_run=args.dry_run)
         review = run_process(
             name="03_claude_review",
-            command=claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
+            command=(
+                solo_command(config, intent="review", resolved_command=require_command(solo_cli(config)))
+                if config.solo_provider else
+                claude_command(claude, config.claude_model, allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path)
+            ),
             prompt=review_prompt,
             cwd=config.workspace,
             out_dir=run_dir,

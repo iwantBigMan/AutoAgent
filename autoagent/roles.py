@@ -93,6 +93,12 @@ def resolve_role(
     agent는 이미 결정된 구체 에이전트(claude/codex). entry["agent"]가 "route"면
     호출부가 route에서 뽑아 넘긴다. 동작은 현행 리졸버들과 바이트 단위로 일치해야 한다.
     """
+    # solo 폴백: solo_provider가 설정되면 모든 역할을 그 프로바이더가 겸직한다.
+    # 상류에서 배정된 agent(architect="claude"/evaluator="codex"/반대모델 등)를 여기서 덮는다.
+    # 정상(null)이면 no-op이라 교차모델 경로는 바이트 동형.
+    if getattr(config, "solo_provider", None):
+        agent = config.solo_provider
+
     mutating = bool(entry["mutating"])
 
     # high-risk 조건 판정(역할별 비대칭 그대로).

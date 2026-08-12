@@ -20,6 +20,15 @@ from autoagent.workflows.simple import run_simple_workflow
 from autoagent.workflows.task_exec import run_task_graph_execution
 
 
+def solo_banner(provider: str) -> str:
+    """solo 모드 시작 경고 배너 문자열. Windows cp949 stdout에서도 인코딩 가능해야 하므로
+    비-cp949 문자(예: em dash \\u2014)를 쓰지 않는다(ASCII 하이픈 사용)."""
+    return (
+        f"[solo] SOLO MODE: {provider} 단독 - 교차모델 대신 "
+        "단일 프로바이더 적대검증(엄격도 감소)."
+    )
+
+
 def load_request(args: argparse.Namespace) -> str:
     """요청 텍스트를 --request-file > --request > stdin 순으로 읽는다. 없으면 종료."""
     if args.request_file:
@@ -122,6 +131,8 @@ def main() -> int:
     from autoagent.mcp import write_claude_mcp_config, check_mcp_symmetry
     for _mcp_warning in check_mcp_symmetry(config):
         print(f"[mcp] {_mcp_warning}")
+    if config.solo_provider:
+        print(solo_banner(config.solo_provider))
     if args.workspace:
         config.workspace = Path(args.workspace)
 
@@ -176,6 +187,7 @@ def main() -> int:
             "codex_model": config.codex_model,
             "codex_reasoning_effort": config.codex_reasoning_effort,
             "codex_high_risk_effort": config.codex_high_risk_effort,
+            "solo_provider": config.solo_provider,
         },
     )
 

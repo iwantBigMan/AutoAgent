@@ -88,6 +88,8 @@ class Config:
     research_per_stage_calls: int = 6
     research_per_outer_calls: int = 40
     research_max_capture_chars: int = 12000
+    # solo 폴백: 설정되면 살아 있는 이 프로바이더가 전 역할을 겸직한다(null=교차모델 현행).
+    solo_provider: str | None = None
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
@@ -138,10 +140,18 @@ def load_config(path: Path, project: str | None = None) -> Config:
         "codex": {
             "standard": {"model": codex_model, "effort": codex_reasoning_effort},
             "deep": {"model": codex_model, "effort": codex_high_risk_effort},
+            "light": {"model": codex_model, "effort": None},
             "cheap": {"model": "gpt-5.6-terra", "effort": "low"},
         },
     }
     tiers = _merge_tiers(default_tiers, raw.get("tiers") or {})
+
+    # solo 폴백 값 검증: null/claude/codex만 허용.
+    solo_provider = raw.get("solo_provider") or None
+    if solo_provider is not None and solo_provider not in {"claude", "codex"}:
+        raise SystemExit(
+            f"solo_provider must be 'claude', 'codex', or null; got {solo_provider!r}"
+        )
 
     return Config(
         workspace=workspace,
@@ -175,4 +185,5 @@ def load_config(path: Path, project: str | None = None) -> Config:
         verification_commands=list(raw.get("verification_commands") or []),
         verification_timeout_seconds=int(raw.get("verification_timeout_seconds") or 1800),
         tiers=tiers,
+        solo_provider=solo_provider,
     )

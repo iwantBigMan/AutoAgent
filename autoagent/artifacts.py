@@ -17,6 +17,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "autoagent.config.json"
 PROMPT_ALIASES = {
+    "_solo_adversarial_preamble.md": "routed/_solo_adversarial_preamble.md",
     "plan.md": "simple/plan.md",
     "execute.md": "simple/execute.md",
     "review.md": "simple/review.md",

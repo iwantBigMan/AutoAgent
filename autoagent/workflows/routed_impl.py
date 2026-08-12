@@ -27,6 +27,18 @@ from autoagent.workflows.routed_common import (
 )
 
 
+def maybe_prepend_adversarial(prompt: str, config: Config, is_review: bool) -> str:
+    """solo 모드의 리뷰 역할이면 적대 프리앰블을 프롬프트 앞에 붙인다(아니면 원본).
+
+    교차모델 리뷰어 부재 시 같은 모델의 rubber-stamp를 막는다. research 검증 프롬프트는
+    이미 적대적이라 여기 오지 않는다(routed/decompose 리뷰 역할 전용).
+    """
+    if not getattr(config, "solo_provider", None) or not is_review:
+        return prompt
+    preamble = render_template("_solo_adversarial_preamble.md", {})
+    return preamble + "\n" + prompt
+
+
 def run_impl_review_fix(
     *,
     args: Namespace,
@@ -291,6 +303,8 @@ def run_final_review(
         prompt_name,
         {**common, "IMPLEMENTATION_RESULT": implementation, "REVIEW_RESULT": review, "FIX_RESULT": fix},
     )
+    # solo 모드: final-review도 적대 프리앰블 주입.
+    final_review_prompt = maybe_prepend_adversarial(final_review_prompt, config, is_review=True)
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", final_review_prompt)
         write_command_artifact(run_dir, name, command_for_agent(config, final_review_role))
@@ -339,6 +353,8 @@ def run_role_step(
     )
 
     prompt = render_template(prompt_name, prompt_values)
+    # solo 모드: 리뷰 역할이면 적대 프리앰블을 붙여 자기검증 rubber-stamp를 막는다.
+    prompt = maybe_prepend_adversarial(prompt, config, is_review=(role_id == "reviewer"))
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", prompt)
         write_command_artifact(run_dir, name, command_for_agent(config, resolved))
