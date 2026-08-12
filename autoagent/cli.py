@@ -122,6 +122,11 @@ def main() -> int:
     from autoagent.mcp import write_claude_mcp_config, check_mcp_symmetry
     for _mcp_warning in check_mcp_symmetry(config):
         print(f"[mcp] {_mcp_warning}")
+    if config.solo_provider:
+        print(
+            f"[solo] SOLO MODE: {config.solo_provider} 단독 — 교차모델 대신 "
+            "단일 프로바이더 적대검증(엄격도 감소)."
+        )
     if args.workspace:
         config.workspace = Path(args.workspace)
 
@@ -176,6 +181,7 @@ def main() -> int:
             "codex_model": config.codex_model,
             "codex_reasoning_effort": config.codex_reasoning_effort,
             "codex_high_risk_effort": config.codex_high_risk_effort,
+            "solo_provider": config.solo_provider,
         },
     )
 
