@@ -99,3 +99,24 @@ def test_solo_command_codex_execute_uses_config_sandbox(tmp_path):
     cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "codex", "codex_sandbox": "workspace-write"}))
     cmd = solo_command(cfg, intent="execute", resolved_command="codex.cmd")
     assert "workspace-write" in cmd
+
+
+from autoagent.workflows.routed_impl import maybe_prepend_adversarial
+
+
+def test_preamble_null_is_noop(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {}))
+    assert maybe_prepend_adversarial("BODY", cfg, is_review=True) == "BODY"
+
+
+def test_preamble_solo_non_review_is_noop(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "claude"}))
+    assert maybe_prepend_adversarial("BODY", cfg, is_review=False) == "BODY"
+
+
+def test_preamble_solo_review_prepends(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "claude"}))
+    out = maybe_prepend_adversarial("BODY", cfg, is_review=True)
+    assert out.endswith("BODY")
+    assert "적대적 리뷰 지침" in out
+    assert out != "BODY"
