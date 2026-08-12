@@ -70,3 +70,32 @@ def test_resolve_role_solo_codex_light_role_no_keyerror(tmp_path):
     r = resolve_role(roles["report"], config=cfg, route=_ROUTE, request="write report", agent="claude", read_only=False)
     assert r.agent == "codex"
     assert r.model == cfg.tiers["codex"]["light"]["model"]
+
+
+from autoagent.runner import solo_command
+
+
+def test_solo_command_claude_plan(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "claude"}))
+    cmd = solo_command(cfg, intent="plan", resolved_command="claude.cmd")
+    assert cmd[0] == "claude.cmd"
+    assert "--permission-mode" in cmd and "plan" in cmd
+
+
+def test_solo_command_claude_execute_acceptedits(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "claude"}))
+    cmd = solo_command(cfg, intent="execute", resolved_command="claude.cmd")
+    assert "acceptEdits" in cmd  # 기본 claude_impl_permission
+
+
+def test_solo_command_codex_review_readonly(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "codex"}))
+    cmd = solo_command(cfg, intent="review", resolved_command="codex.cmd")
+    assert cmd[0] == "codex.cmd"
+    assert "--sandbox" in cmd and "read-only" in cmd
+
+
+def test_solo_command_codex_execute_uses_config_sandbox(tmp_path):
+    cfg = load_config(_write_cfg(tmp_path, {"solo_provider": "codex", "codex_sandbox": "workspace-write"}))
+    cmd = solo_command(cfg, intent="execute", resolved_command="codex.cmd")
+    assert "workspace-write" in cmd

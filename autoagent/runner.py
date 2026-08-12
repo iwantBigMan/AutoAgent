@@ -139,6 +139,38 @@ def codex_exec_command(
     return command
 
 
+def solo_cli(config: Config) -> str:
+    """solo 프로바이더의 CLI 명령 문자열(claude_command/codex_command)."""
+    return config.claude_command if config.solo_provider == "claude" else config.codex_command
+
+
+def solo_command(config: Config, *, intent: str, resolved_command: str) -> list[str]:
+    """solo 프로바이더로 intent(plan|review|execute)에 맞는 커맨드를 조립한다.
+
+    plan/review=읽기전용, execute=변이. claude=permission_mode/skip_permissions,
+    codex=sandbox로 매핑해 resolve_role의 posture와 정합. 우회 사이트(decompose/simple)
+    전용 — resolve_role 경유 역할은 여기 오지 않는다.
+    """
+    if config.solo_provider == "claude":
+        if intent == "execute":
+            if config.claude_impl_permission == "bypassPermissions":
+                return claude_command(
+                    resolved_command, config.claude_model, None, skip_permissions=True,
+                    allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path,
+                )
+            return claude_command(
+                resolved_command, config.claude_model, "acceptEdits",
+                allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path,
+            )
+        return claude_command(
+            resolved_command, config.claude_model, "plan",
+            allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path,
+        )
+    # codex: 읽기전용(plan/review) 또는 config 샌드박스(execute).
+    sandbox = config.codex_sandbox if intent == "execute" else "read-only"
+    return codex_exec_command(config, resolved_command, sandbox)
+
+
 def write_command_artifact(out_dir: Path, name: str, command: list[str]) -> None:
     write_text(out_dir / f"{name}_command.json", json.dumps(command, ensure_ascii=False, indent=2))
 

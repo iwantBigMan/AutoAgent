@@ -13,7 +13,7 @@ from typing import Any
 
 from autoagent.artifacts import extract_json_block, render_template, write_json, write_text
 from autoagent.config import Config
-from autoagent.runner import claude_command, codex_exec_command, require_command, run_process, write_command_artifact
+from autoagent.runner import claude_command, codex_exec_command, require_command, run_process, solo_command, write_command_artifact, solo_cli
 from autoagent.workflows.routed_common import resume_command_for
 
 
@@ -25,20 +25,26 @@ def run_decompose_workflow(args: Namespace, config: Config, request: str, run_di
     }
 
     decomposition_prompt = render_template("claude_decompose.md", values)
+    solo = config.solo_provider
     if args.dry_run:
         write_text(run_dir / "01_claude_decomposition_prompt.md", decomposition_prompt)
-        write_command_artifact(
-            run_dir,
-            "01_claude_decomposition",
-            claude_command(config.claude_command, config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
+        cmd = (
+            solo_command(config, intent="plan", resolved_command=solo_cli(config))
+            if solo else
+            claude_command(config.claude_command, config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path)
         )
+        write_command_artifact(run_dir, "01_claude_decomposition", cmd)
         decomposition = dry_run_task_graph(request)
         write_text(run_dir / "01_claude_decomposition.md", decomposition)
     else:
-        claude = require_command(config.claude_command)
+        cmd = (
+            solo_command(config, intent="plan", resolved_command=require_command(solo_cli(config)))
+            if solo else
+            claude_command(require_command(config.claude_command), config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path)
+        )
         decomposition = run_process(
             name="01_claude_decomposition",
-            command=claude_command(claude, config.claude_model, "plan", allowed_tools=config.mcp_allowed_tools, mcp_config_path=config.mcp_config_path),
+            command=cmd,
             prompt=decomposition_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
@@ -58,18 +64,23 @@ def run_decompose_workflow(args: Namespace, config: Config, request: str, run_di
     )
     if args.dry_run:
         write_text(run_dir / "02_codex_plan_review_prompt.md", review_prompt)
-        write_command_artifact(
-            run_dir,
-            "02_codex_plan_review",
-            codex_exec_command(config, config.codex_command, "read-only"),
+        cmd = (
+            solo_command(config, intent="review", resolved_command=solo_cli(config))
+            if solo else
+            codex_exec_command(config, config.codex_command, "read-only")
         )
+        write_command_artifact(run_dir, "02_codex_plan_review", cmd)
         plan_review = "PLAN_REVIEW_STATUS: approved\n\n[dry-run: Codex plan review output]"
         write_text(run_dir / "02_codex_plan_review.md", plan_review)
     else:
-        codex = require_command(config.codex_command)
+        cmd = (
+            solo_command(config, intent="review", resolved_command=require_command(solo_cli(config)))
+            if solo else
+            codex_exec_command(config, require_command(config.codex_command), "read-only")
+        )
         plan_review = run_process(
             name="02_codex_plan_review",
-            command=codex_exec_command(config, codex, "read-only"),
+            command=cmd,
             prompt=review_prompt,
             cwd=config.workspace,
             out_dir=run_dir,
