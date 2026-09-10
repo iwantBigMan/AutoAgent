@@ -19,6 +19,11 @@ cross-model implement/review with human approval gates. Full reference: `README.
 ## Workflows & layout
 - `--workflow simple|routed|decompose|research`; routed = context→architecture⇄validation→
   approval gate→implement→review⇄fix→eval→report.
+- **프롬프트 정제 게이트(전 워크플로 공통)**: 요청은 기본적으로 refine 콜(Claude light)로
+  구조화된 뒤 `waiting_for_prompt_approval` 게이트에서 정지한다 — `00_refined_request.md`를
+  확인·편집 후 `--resume`이 곧 승인. `--no-refine`으로 스킵. 정제 콜은 `--max-agent-calls`와
+  별도 계정. 코어 `autoagent/refine.py`, 프롬프트 `prompts/refine/claude_refine.md`.
+  **라이브 정제 콜은 미실증(사용자 인계)** — pytest+dry-run까지만 검증됨.
 - `research` = 영업/데이터 리서치(회사·시장·CSV정제·웹팩트리포트→도출): 중첩 루프(안쪽 리서치→검증→보정 ×3,
   바깥 심화 ×2) + 교차모델 적대검증(어댑터 crossmodel/data_quality/source_grounding) + 게이트·재개 + 인용 HTML
   리포트. 코어 `autoagent/research/**`·`autoagent/data/**`, 오케스트레이터 `autoagent/workflows/research.py`,
