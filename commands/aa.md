@@ -38,6 +38,18 @@ Substitute TYPE, N, PROJECT, REQUEST. From the output, capture the run directory
 
 Read `<RUN_DIR>/approval_status.json` if it exists.
 
+- **Prompt gate** — stdout contains `AA_STATUS: waiting_for_prompt_approval` (or
+  `refine_status.json.status == "waiting_for_prompt_approval"`):
+  1. Read `<RUN_DIR>/00_refined_request.md` and `<RUN_DIR>/00_request_raw.md`.
+  2. 정제본 전문과 원문 대비 달라진 요지를 사용자에게 보여준다.
+     `refine_status.json.fallback`이 true면 "정제 콜 실패로 원문이 그대로
+     담겨 있음"을 함께 알린다.
+  3. Ask plainly: "이 프롬프트로 진행할까요? (승인 / 수정 / 거부)".
+  4. 승인: run the `RESUME_COMMAND` line verbatim. 수정: 사용자의 피드백대로
+     `<RUN_DIR>/00_refined_request.md`를 편집한 뒤 `RESUME_COMMAND`를 실행한다.
+     어느 쪽이든 그 출력에 대해 **이 섹션 3의 분기를 처음부터 다시 적용**한다
+     (정제 승인 뒤 high-risk 계획 게이트가 또 설 수 있다).
+  5. 거부: stop. 런은 보존되며 나중에 같은 명령으로 재개 가능함을 알린다.
 - **Gate** — stdout contains `ROUTED_STATUS: waiting_for_human_approval` (or
   `approval_status.json.status == "waiting_for_human_approval"`):
   1. Read `<RUN_DIR>/01_claude_context.md`, `02_claude_architecture.md`,

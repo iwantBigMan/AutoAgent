@@ -51,7 +51,7 @@ def validate_roles(
 ) -> None:
     """시작 시 레지스트리 정합성 검사. 문제가 있으면 즉시 종료한다."""
     required = {"context", "architect", "validation", "implementer", "reviewer",
-                "fix", "final-review", "evaluation", "report"}
+                "fix", "final-review", "evaluation", "report", "refine"}
     missing = required - set(roles)
     if missing:
         raise SystemExit(f"roles.default.json에 필수 역할 누락: {sorted(missing)}")

@@ -111,10 +111,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Research workflow: auto-pass non-branch gates (never skips forced high-cost/contradiction/blocked gates)",
     )
     parser.add_argument(
+        "--no-refine", action="store_true",
+        help="Skip the prompt refine gate and run with the raw request",
+    )
+    parser.add_argument(
         "--resume",
         help="Resume a gated routed run from its run directory; loads checkpoint.json and continues into implementation",
     )
     return parser
+
+
+def dispatch_workflow(args: argparse.Namespace, config, request: str, run_dir: Path) -> int:
+    """요청 텍스트로 워크플로를 시작한다(신규 런과 refine 게이트 재개가 공용)."""
+    if args.workflow == "routed":
+        return run_routed_workflow(args, config, request, run_dir)
+    if args.workflow == "decompose":
+        return run_decompose_workflow(args, config, request, run_dir)
+    if args.workflow == "research":
+        return run_research_workflow(args, config, request, run_dir)
+    return run_simple_workflow(args, config, request, run_dir)
 
 
 def main() -> int:
@@ -142,6 +157,21 @@ def main() -> int:
         if args.request or args.request_file:
             raise SystemExit("--resume cannot be combined with --request/--request-file.")
         run_dir = Path(args.resume)
+        from autoagent.refine import refine_gate_pending, resume_from_refine_gate
+        # refine 게이트 재개는 다른 재개 체크(research_state/checkpoint)보다 먼저 -
+        # 이 시점엔 그 파일들이 아직 없다. --resume 실행 자체가 프롬프트 승인이다.
+        if refine_gate_pending(run_dir):
+            request, refine_status = resume_from_refine_gate(args, run_dir)
+            # 원 런의 project/config로 재로딩(티어·solo 등 반영) 후 workspace 복원.
+            config = load_config(Path(args.config), project=args.project)
+            config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
+            if args.workspace:
+                config.workspace = Path(args.workspace)
+            else:
+                config.workspace = Path(refine_status["workspace"])
+            if not config.workspace.exists():
+                raise SystemExit(f"Workspace does not exist: {config.workspace}")
+            return dispatch_workflow(args, config, request, run_dir)
         # 재개 run의 run_dir 밑에 Claude용 MCP config 생성(dry-run이면 경로만, 파일 미기록).
         config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
         if (run_dir / "research_state.json").exists():
@@ -160,7 +190,6 @@ def main() -> int:
 
     run_dir = make_run_dir(project=args.project)
     config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
-    write_text(run_dir / "00_request.md", request)
     write_metadata(
         run_dir,
         {
@@ -179,6 +208,7 @@ def main() -> int:
             "plan_only": args.plan_only,
             "skip_review": args.skip_review,
             "dry_run": args.dry_run,
+            "no_refine": args.no_refine,
             "claude_model": config.claude_model,
             "claude_high_risk_model": config.claude_high_risk_model,
             "claude_effort": config.claude_effort,
@@ -191,10 +221,12 @@ def main() -> int:
         },
     )
 
-    if args.workflow == "routed":
-        return run_routed_workflow(args, config, request, run_dir)
-    if args.workflow == "decompose":
-        return run_decompose_workflow(args, config, request, run_dir)
-    if args.workflow == "research":
-        return run_research_workflow(args, config, request, run_dir)
-    return run_simple_workflow(args, config, request, run_dir)
+    if not args.no_refine:
+        from autoagent.refine import run_refine_stage
+        refined = run_refine_stage(args, config, request, run_dir)
+        if refined is None:
+            # 게이트 정지 - 정제본 검토 후 --resume으로 승인·계속한다.
+            return 0
+        request = refined  # dry-run 통과 경로(원문 그대로)
+    write_text(run_dir / "00_request.md", request)
+    return dispatch_workflow(args, config, request, run_dir)
