@@ -128,9 +128,10 @@ resolve_role 경유로 티어·solo 스왑·permission이 기존 기제대로 �
 
 ## dry-run 동작
 
-정제 프롬프트(`00_refine_prompt.md`)와 command 아티팩트(`refine_command.json`)를
-렌더하고, 게이트 정지 **없이** 플레이스홀더 정제본으로 전 스테이지를 통과한다
-(기존 dry-run 관례: CLI 미호출, 예산 미차감, exit 0).
+정제 프롬프트(`00_refine_prompt.md`)와 command 아티팩트(`00_refine_command.json`)를
+렌더하고, 게이트 정지 **없이 원문을 그대로** 다음 스테이지에 넘긴다(플레이스홀더가
+아니라 원문 통과 — auto 라우팅·high-risk 판정이 요청 텍스트 기반이라 플레이스홀더면
+dry-run의 검증 목적이 깨진다). 기존 dry-run 관례(CLI 미호출, 예산 미차감, exit 0) 유지.
 
 ## 검증 계획
 
