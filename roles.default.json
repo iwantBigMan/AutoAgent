@@ -10,7 +10,7 @@
     { "id": "final-review",  "agent": "route",   "tier": "standard",                          "high_risk_condition": "none",                       "mutating": false, "sandbox": "configured" },
     { "id": "evaluation",    "agent": "codex",   "tier": "standard",                          "high_risk_condition": "none",                       "mutating": false, "sandbox": "from_read_only" },
     { "id": "report",        "agent": "claude",  "tier": "light",                             "high_risk_condition": "none",                       "mutating": false, "permission": "plan" },
-    { "id": "refine",        "agent": "claude",  "tier": "light",                             "high_risk_condition": "none",                       "mutating": false, "permission": "plan" },
+    { "id": "refine",        "agent": "claude",  "tier": "light",                             "high_risk_condition": "none",                       "mutating": false, "permission": "plan", "sandbox": "from_read_only" },
     { "id": "researcher",    "agent": "route",   "tier": "standard", "high_risk_tier": "deep", "high_risk_condition": "any_high_risk",               "mutating": false, "permission": "plan" },
     { "id": "verifier",      "agent": "route",   "tier": "deep",                              "high_risk_condition": "none",                       "mutating": false, "permission": "plan" }
   ]

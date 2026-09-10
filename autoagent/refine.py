@@ -29,7 +29,7 @@ STAGE_NAME = "00_refine"
 SNAPSHOT_KEYS = [
     "workflow", "task_type", "implementer", "read_only", "max_review_rounds",
     "max_agent_calls", "stop_after", "skip_verification", "require_human_approval",
-    "plan_only", "skip_review", "project", "config", "no_refine",
+    "plan_only", "skip_review", "auto_approve_nonbranch", "project", "config", "no_refine",
 ]
 
 

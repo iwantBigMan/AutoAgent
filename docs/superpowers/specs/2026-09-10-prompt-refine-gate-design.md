@@ -51,12 +51,14 @@ load_request → 00_request_raw.md 저장
 
 단일 목적 모듈. 공개 함수(안):
 
-- `run_refine_stage(args, config, request, run_dir) -> int` — 정제 콜 실행,
-  게이트 파일 기록, `AA_STATUS` 핸드오프 출력 후 0 반환.
+- `run_refine_stage(args, config, request, run_dir) -> str | None` — 정제 콜
+  실행, 게이트 파일 기록, `AA_STATUS` 핸드오프 출력. `None`=게이트 정지(호출부
+  exit 0), `str`=dry-run 통과 텍스트(원문 그대로 다음 스테이지로).
 - `refine_gate_pending(run_dir) -> bool` — `refine_status.json`이 존재하고
   `status == "waiting_for_prompt_approval"`인지 판정(resume 분기용).
-- `resume_from_refine_gate(args, config, run_dir) -> int` — 정제본을 읽어
-  approved 갱신 + 원래 워크플로 재디스패치.
+- `resume_from_refine_gate(args, run_dir) -> tuple[str, dict]` — 정제본(편집
+  포함)을 읽고 approved 갱신, args 스냅샷 복원. 재디스패치는 호출부(cli.py)
+  담당.
 
 `cli.py`는 (a) 신규 런에서 `--no-refine`이 아니면 `run_refine_stage` 호출,
 (b) `--resume` 분기 **맨 앞**에 `refine_gate_pending` 체크 — 이렇게 분기
@@ -93,10 +95,11 @@ resolve_role 경유로 티어·solo 스왑·permission이 기존 기제대로 �
 - `00_request_raw.md` — 원문 보존(`--no-refine` 시 미생성).
 - `00_refined_request.md` — 정제본. **resume 전에 편집하면 편집본이 채택된다.**
 - `refine_status.json` — `status`(waiting_for_prompt_approval → approved),
-  `run_dir`, `resume_command`, 그리고 재디스패치용 **args 스냅샷**(workflow,
-  task_type, implementer, read_only, max_review_rounds, max_agent_calls,
-  stop_after, skip_verification, require_human_approval, plan_only,
-  skip_review, project, workspace, config_path 등).
+  `run_dir`, `resume_command`, `workspace`(최상위 필드), 그리고 재디스패치용
+  **args 스냅샷**(`args` 키 아래: workflow, task_type, implementer, read_only,
+  max_review_rounds, max_agent_calls, stop_after, skip_verification,
+  require_human_approval, plan_only, skip_review, auto_approve_nonbranch,
+  project, `config`(설정 파일 경로), no_refine).
 - `refine_required.md` — 사람용 안내(정제본 검토 → 편집(선택) → resume 명령).
 - `00_request.md` — **resume 승인 시점에 정제본으로 기록**. 다운스트림 전
   단계가 이 이름을 참조하므로 이후 흐름 무변경.
