@@ -1,0 +1,51 @@
+"""포터빌리티(하드코딩 제거+자동 감지) 단위테스트: CLI 명령 감지·workspace 미지정."""
+from __future__ import annotations
+
+from autoagent import config as config_mod
+
+
+def test_autodetect_cli_explicit_passthrough(monkeypatch):
+    # 명시값은 which를 묻지 않고 그대로 반환한다(무회귀 계약).
+    monkeypatch.setattr(config_mod.shutil, "which", lambda name: None)
+    assert config_mod.autodetect_cli("my-claude.exe", ["claude.cmd", "claude"]) == "my-claude.exe"
+
+
+def test_autodetect_cli_auto_and_none_pick_first_found(monkeypatch):
+    # 미지정(None)과 "auto"는 동일 취급 — 후보 순회 첫 발견 '이름'을 반환.
+    monkeypatch.setattr(
+        config_mod.shutil, "which", lambda name: "/usr/bin/claude" if name == "claude" else None
+    )
+    assert config_mod.autodetect_cli(None, ["claude.cmd", "claude"]) == "claude"
+    assert config_mod.autodetect_cli("auto", ["claude.cmd", "claude"]) == "claude"
+
+
+def test_autodetect_cli_none_found_falls_back_to_first(monkeypatch):
+    # 전부 미발견이어도 raise하지 않는다(dry-run은 CLI 없이도 돌아야 함).
+    monkeypatch.setattr(config_mod.shutil, "which", lambda name: None)
+    assert config_mod.autodetect_cli(None, ["codex.cmd", "codex"]) == "codex.cmd"
+
+
+def test_load_config_workspace_none_without_sources(tmp_path, monkeypatch):
+    # config 파일도 env도 없으면 workspace는 None(하드코딩 폴백 제거).
+    monkeypatch.delenv("AUTOAGENT_WORKSPACE", raising=False)
+    cfg = config_mod.load_config(tmp_path / "absent.json")
+    assert cfg.workspace is None
+
+
+def test_load_config_workspace_env_still_works(tmp_path, monkeypatch):
+    monkeypatch.setenv("AUTOAGENT_WORKSPACE", str(tmp_path))
+    cfg = config_mod.load_config(tmp_path / "absent.json")
+    assert cfg.workspace == tmp_path
+
+
+def test_load_config_explicit_commands_preserved(tmp_path, monkeypatch):
+    # config 명시값은 which 결과와 무관하게 그대로(소유자 머신 무회귀).
+    monkeypatch.setattr(config_mod.shutil, "which", lambda name: None)
+    p = tmp_path / "c.json"
+    p.write_text(
+        '{"workspace": ".", "claude_command": "claude.cmd", "codex_command": "codex.cmd"}',
+        encoding="utf-8",
+    )
+    cfg = config_mod.load_config(p)
+    assert cfg.claude_command == "claude.cmd"
+    assert cfg.codex_command == "codex.cmd"
