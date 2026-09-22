@@ -29,6 +29,39 @@ def solo_banner(provider: str) -> str:
     )
 
 
+def write_home_pointer(pointer: Path | None = None) -> None:
+    """~/.autoagent/home에 하네스 ROOT 절대경로 한 줄을 기록한다(자기등록).
+
+    /aa·/aar 커맨드가 클론 위치를 하드코딩 없이 찾는 근거 파일. 내용이 이미
+    같으면 재기록하지 않고, 기록 실패(권한 등)는 경고만 남기고 런을 계속한다.
+    """
+    line = str(DEFAULT_CONFIG.parent)
+    try:
+        # target 계산(Path.home() 포함)도 try 안에서 한다 - USERPROFILE 미설정 환경에서
+        # Path.home()이 던지는 RuntimeError까지 "경고만, 런 계속" 계약에 포함시킨다.
+        target = pointer if pointer is not None else Path.home() / ".autoagent" / "home"
+        # 기존 포인터가 비UTF8 바이트로 손상돼 있어도 크래시하지 않는다 - errors="replace"로
+        # 읽으면 내용 비교가 불일치로 나와 아래에서 자동 재기록(자가 치유)된다.
+        if target.exists() and target.read_text(encoding="utf-8", errors="replace").strip() == line:
+            return
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(line + "\n", encoding="utf-8")
+    except (OSError, RuntimeError) as exc:
+        # 자기등록은 편의 기능 - 실패해도 런 자체는 계속한다(ASCII+한글만 출력).
+        # RuntimeError는 Path.home()이 홈 디렉터리를 못 찾을 때(예: USERPROFILE 미설정) 던진다.
+        print(f"[home] 홈 포인터 기록 실패(계속 진행): {exc}")
+
+
+def require_workspace(config) -> None:
+    """workspace 미지정(None)이면 해결 방법 3가지를 안내하고 종료한다."""
+    if config.workspace is None:
+        raise SystemExit(
+            "Workspace not set. Fix one of: (1) copy autoagent.config.example.json to "
+            'autoagent.config.json and set "workspace", (2) set AUTOAGENT_WORKSPACE, '
+            "(3) pass --workspace <path>."
+        )
+
+
 def load_request(args: argparse.Namespace) -> str:
     """요청 텍스트를 --request-file > --request > stdin 순으로 읽는다. 없으면 종료."""
     if args.request_file:
@@ -134,6 +167,7 @@ def dispatch_workflow(args: argparse.Namespace, config, request: str, run_dir: P
 
 def main() -> int:
     args = build_parser().parse_args()
+    write_home_pointer()  # 자기등록: /aa·/aar가 이 클론을 찾을 수 있게 한다(dry-run 포함)
     if args.project:
         # --project가 요구하는 config를 미리 보장한다. workspace는 --workspace(abs) 우선, 없으면 cwd.
         ws = Path(args.workspace).resolve() if args.workspace else Path.cwd()
@@ -175,12 +209,19 @@ def main() -> int:
         # 재개 run의 run_dir 밑에 Claude용 MCP config 생성(dry-run이면 경로만, 파일 미기록).
         config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
         if (run_dir / "research_state.json").exists():
+            # research 재개는 config workspace를 그대로 쓴다(상태파일에 복원 없음) - None 방어.
+            require_workspace(config)
             return run_research_workflow(args, config, None, run_dir)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
+            # task_graph 재개는 run_task_graph_execution 내부에서 checkpoint의
+            # workspace를 복원한다 - 여기서 먼저 require_workspace를 걸면 config/env에
+            # workspace가 없는 정상 재개(체크포인트에만 있는 경우)가 오차단된다.
+            # None 방어는 복원 직후로 옮겼다(task_exec.run_task_graph_execution 참고).
             return run_task_graph_execution(args, config, run_dir)
         return resume_routed_workflow(args, config)
 
+    require_workspace(config)
     if not config.workspace.exists():
         raise SystemExit(f"Workspace does not exist: {config.workspace}")
 

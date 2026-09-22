@@ -5,7 +5,8 @@ allowed-tools: Bash(python:*), Read, Glob
 ---
 
 You are driving the AutoAgent **research** workflow against the CURRENT project (the
-one this session is in). The harness lives at `C:\Users\systran\Desktop\AutoAgent`.
+one this session is in). The harness location (HARNESS) is resolved in section 1 —
+never hardcode it.
 It researches company / market / CSV / web-fact topics through a nested deepen loop
 with cross-model adversarial verification, and emits a cited standalone-HTML report.
 Free sources only (web + local CSV). The harness gates high-cost/contradiction/blocked
@@ -22,6 +23,12 @@ Raw arguments: `$ARGUMENTS`
   이 이름으로 런을 `projects/<PROJECT>/runs/<stamp>`에 격리한다. config가 없으면 하네스가
   현재 workspace로 자동 생성한다.
 - Budget N = `40`(전역 호출 상한; 하네스가 스테이지별/outer별 상한도 별도로 건다).
+- HARNESS = 환경변수 `AUTOAGENT_HOME`이 있으면 그 값, 없으면 `~/.autoagent/home`
+  파일의 첫 줄(공백·CR 트림). Git Bash 예:
+  `HARNESS="${AUTOAGENT_HOME:-$(head -n1 ~/.autoagent/home 2>/dev/null | tr -d '\r')}"`
+  둘 다 비어 있으면 정지하고 사용자에게 안내한다: "하네스 클론 디렉터리에서
+  `python run.py --dry-run --workflow routed --task-type docs --workspace . --request "ping"`
+  을 한 번 실행하면 자동 등록됩니다."
 
 ## 2. Run the research workflow
 
@@ -29,10 +36,10 @@ Run (live unless DRY — DRY면 아래 명령 끝에 `--dry-run`을 붙여 프�
 실제 claude/codex 호출을 0으로 만든다):
 
 ```
-python "C:\Users\systran\Desktop\AutoAgent\run.py" --workflow research --request "REQUEST" --project "PROJECT" --workspace . --max-agent-calls N
+python "<HARNESS>\run.py" --workflow research --request "REQUEST" --project "PROJECT" --workspace . --max-agent-calls N
 ```
 
-Substitute REQUEST, PROJECT, N. Capture the run directory `<RUN_DIR>` from whichever
+Substitute HARNESS, REQUEST, PROJECT, N. Capture the run directory `<RUN_DIR>` from whichever
 of these stdout lines appears (하네스는 절대경로로 출력한다):
 - `RUN_DIR: <path>` — 게이트에서 정지한 경우,
 - `Research run complete: <path>` — 정상 완료한 경우,

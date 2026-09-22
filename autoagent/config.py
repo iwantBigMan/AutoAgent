@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,11 +43,27 @@ def _merge_tiers(
     return merged
 
 
+def autodetect_cli(explicit: str | None, candidates: list[str]) -> str:
+    """CLI 명령명을 결정한다. 명시값(비어있지 않고 "auto" 아님)은 그대로 반환한다.
+
+    미지정/"auto"면 candidates를 순서대로 shutil.which로 탐지해 처음 발견된
+    '이름'을 반환한다(절대경로가 아니라 이름 — command json 아티팩트 바이트 호환).
+    아무것도 없으면 candidates[0] 폴백 — dry-run은 CLI 미설치 머신에서도 돌아야
+    하므로 여기서 죽지 않는다(실호출은 runner.require_command가 명확히 실패).
+    """
+    if explicit and explicit != "auto":
+        return explicit
+    for name in candidates:
+        if shutil.which(name):
+            return name
+    return candidates[0]
+
+
 @dataclass
 class Config:
     """하네스 전역 설정 값 묶음(모델/effort/샌드박스/타임아웃/예산 기본값 등)."""
 
-    workspace: Path
+    workspace: Path | None  # None=미지정. cli가 --workspace/재개 복원으로 채우거나 require_workspace로 안내 종료.
     claude_command: str
     codex_command: str
     codex_sandbox: str
@@ -95,8 +112,8 @@ class Config:
 def load_config(path: Path, project: str | None = None) -> Config:
     """config JSON을 읽어 Config를 만든다. 파일/키가 없으면 각 항목 기본값을 쓴다.
 
-    workspace는 (프로젝트 config) > 전역 config > AUTOAGENT_WORKSPACE env >
-    하드코딩 기본값 순으로 결정. project가 없으면 전역 config만 읽어 기존과 동일하게 동작한다.
+    workspace는 (프로젝트 config) > 전역 config > AUTOAGENT_WORKSPACE env 순으로
+    결정하고, 셋 다 없으면 None(--workspace/재개 복원 또는 cli 가드의 몫).
     """
     raw: dict[str, Any] = {}
     if path.exists():
@@ -114,11 +131,10 @@ def load_config(path: Path, project: str | None = None) -> Config:
         project_raw = json.loads(project_config_path.read_text(encoding="utf-8-sig"))
         raw = {**raw, **project_raw}  # 얕은 병합: 프로젝트 config가 전역을 키 단위로 덮는다.
 
-    workspace = Path(
-        raw.get("workspace")
-        or os.environ.get("AUTOAGENT_WORKSPACE")
-        or r"C:\Users\systran\Desktop\LanguageDetection"
-    )
+    workspace_raw = raw.get("workspace") or os.environ.get("AUTOAGENT_WORKSPACE")
+    # 하드코딩 개인 경로 폴백은 제거됐다(포터빌리티). 미지정이면 None —
+    # cli.require_workspace가 안내 후 종료하거나 --workspace/재개 복원이 채운다.
+    workspace = Path(workspace_raw) if workspace_raw else None
 
     # 모델/effort 기본값(팔레트 합성과 Config 양쪽에서 재사용).
     claude_model = raw.get("claude_model") or "sonnet"
@@ -155,8 +171,8 @@ def load_config(path: Path, project: str | None = None) -> Config:
 
     return Config(
         workspace=workspace,
-        claude_command=raw.get("claude_command") or "claude.cmd",
-        codex_command=raw.get("codex_command") or "codex.cmd",
+        claude_command=autodetect_cli(raw.get("claude_command"), ["claude.cmd", "claude"]),
+        codex_command=autodetect_cli(raw.get("codex_command"), ["codex.cmd", "codex"]),
         codex_sandbox=raw.get("codex_sandbox") or "workspace-write",
         codex_approval=raw.get("codex_approval") or "never",
         timeout_seconds=int(raw.get("timeout_seconds") or 3600),
