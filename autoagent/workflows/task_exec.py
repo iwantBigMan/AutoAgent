@@ -349,6 +349,15 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
                 args.max_agent_calls = int(checkpoint["max_agent_calls"])
             if args.max_review_rounds is None and checkpoint.get("max_review_rounds") is not None:
                 args.max_review_rounds = int(checkpoint["max_review_rounds"])
+        # checkpoint 복원 후에도 workspace가 None이면(config/env에도 없고 checkpoint에도
+        # 없던 경우) 여기서 안내 후 종료한다. cli.require_workspace와 동일 메시지 -
+        # cli.py가 이 모듈을 최상단에서 import하므로 순환 import를 피하기 위해 인라인한다.
+        if config.workspace is None:
+            raise SystemExit(
+                "Workspace not set. Fix one of: (1) copy autoagent.config.example.json to "
+                'autoagent.config.json and set "workspace", (2) set AUTOAGENT_WORKSPACE, '
+                "(3) pass --workspace <path>."
+            )
         if not args.dry_run and not config.workspace.exists():
             raise SystemExit(f"Workspace does not exist: {config.workspace}")
 

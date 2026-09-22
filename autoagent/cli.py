@@ -35,15 +35,20 @@ def write_home_pointer(pointer: Path | None = None) -> None:
     /aa·/aar 커맨드가 클론 위치를 하드코딩 없이 찾는 근거 파일. 내용이 이미
     같으면 재기록하지 않고, 기록 실패(권한 등)는 경고만 남기고 런을 계속한다.
     """
-    target = pointer if pointer is not None else Path.home() / ".autoagent" / "home"
     line = str(DEFAULT_CONFIG.parent)
     try:
-        if target.exists() and target.read_text(encoding="utf-8").strip() == line:
+        # target 계산(Path.home() 포함)도 try 안에서 한다 - USERPROFILE 미설정 환경에서
+        # Path.home()이 던지는 RuntimeError까지 "경고만, 런 계속" 계약에 포함시킨다.
+        target = pointer if pointer is not None else Path.home() / ".autoagent" / "home"
+        # 기존 포인터가 비UTF8 바이트로 손상돼 있어도 크래시하지 않는다 - errors="replace"로
+        # 읽으면 내용 비교가 불일치로 나와 아래에서 자동 재기록(자가 치유)된다.
+        if target.exists() and target.read_text(encoding="utf-8", errors="replace").strip() == line:
             return
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(line + "\n", encoding="utf-8")
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
         # 자기등록은 편의 기능 - 실패해도 런 자체는 계속한다(ASCII+한글만 출력).
+        # RuntimeError는 Path.home()이 홈 디렉터리를 못 찾을 때(예: USERPROFILE 미설정) 던진다.
         print(f"[home] 홈 포인터 기록 실패(계속 진행): {exc}")
 
 
@@ -209,8 +214,10 @@ def main() -> int:
             return run_research_workflow(args, config, None, run_dir)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
-            # task_graph 재개도 config workspace를 직접 쓴다 - None 방어.
-            require_workspace(config)
+            # task_graph 재개는 run_task_graph_execution 내부에서 checkpoint의
+            # workspace를 복원한다 - 여기서 먼저 require_workspace를 걸면 config/env에
+            # workspace가 없는 정상 재개(체크포인트에만 있는 경우)가 오차단된다.
+            # None 방어는 복원 직후로 옮겼다(task_exec.run_task_graph_execution 참고).
             return run_task_graph_execution(args, config, run_dir)
         return resume_routed_workflow(args, config)
 

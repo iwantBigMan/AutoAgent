@@ -72,6 +72,17 @@ def test_write_home_pointer_failure_warns_and_survives(tmp_path, capsys):
     assert "[home]" in capsys.readouterr().out
 
 
+def test_write_home_pointer_heals_corrupted_pointer(tmp_path):
+    """F2: 기존 포인터 파일이 비UTF8 바이트로 손상돼 있어도 크래시하지 않고
+    올바른 ROOT 내용으로 자가 치유(재기록)해야 한다."""
+    from autoagent.cli import write_home_pointer
+    pointer = tmp_path / ".autoagent" / "home"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_bytes(b"\xff\xfe garbage")  # UTF-8로 디코딩 불가능한 바이트열
+    write_home_pointer(pointer)  # UnicodeDecodeError 없이 통과해야 한다
+    assert pointer.read_text(encoding="utf-8").strip() == str(ROOT)
+
+
 def test_require_workspace_raises_guidance():
     from types import SimpleNamespace
     from autoagent.cli import require_workspace
