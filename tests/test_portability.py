@@ -1,7 +1,10 @@
 """포터빌리티(하드코딩 제거+자동 감지) 단위테스트: CLI 명령 감지·workspace 미지정."""
 from __future__ import annotations
 
+import pytest
+
 from autoagent import config as config_mod
+from autoagent.artifacts import ROOT
 
 
 def test_autodetect_cli_explicit_passthrough(monkeypatch):
@@ -49,3 +52,35 @@ def test_load_config_explicit_commands_preserved(tmp_path, monkeypatch):
     cfg = config_mod.load_config(p)
     assert cfg.claude_command == "claude.cmd"
     assert cfg.codex_command == "codex.cmd"
+
+
+def test_write_home_pointer_creates_and_is_idempotent(tmp_path):
+    from autoagent.cli import write_home_pointer
+    pointer = tmp_path / ".autoagent" / "home"
+    write_home_pointer(pointer)
+    assert pointer.read_text(encoding="utf-8").strip() == str(ROOT)
+    before = pointer.stat().st_mtime_ns
+    write_home_pointer(pointer)  # 같은 내용이면 재기록하지 않는다
+    assert pointer.stat().st_mtime_ns == before
+
+
+def test_write_home_pointer_failure_warns_and_survives(tmp_path, capsys):
+    from autoagent.cli import write_home_pointer
+    blocker = tmp_path / "blocker"
+    blocker.write_text("x", encoding="utf-8")  # 부모 자리에 파일을 놓아 mkdir 실패 유도
+    write_home_pointer(blocker / "home")       # 예외가 밖으로 새면 안 된다
+    assert "[home]" in capsys.readouterr().out
+
+
+def test_require_workspace_raises_guidance():
+    from types import SimpleNamespace
+    from autoagent.cli import require_workspace
+    with pytest.raises(SystemExit) as exc:
+        require_workspace(SimpleNamespace(workspace=None))
+    assert "AUTOAGENT_WORKSPACE" in str(exc.value)
+
+
+def test_require_workspace_passes_when_set(tmp_path):
+    from types import SimpleNamespace
+    from autoagent.cli import require_workspace
+    require_workspace(SimpleNamespace(workspace=tmp_path))  # raise 없음
