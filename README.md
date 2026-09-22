@@ -35,11 +35,16 @@ routed 역할:
 - PATH에 `codex.cmd`
 - Python 3
 
-기본 작업공간:
+작업공간(workspace)은 기본값이 없으며 반드시 지정해야 합니다:
 
-```text
-C:\Users\systran\Desktop\LanguageDetection
-```
+1. `autoagent.config.example.json`을 `autoagent.config.json`으로 복사해 `workspace` 지정(권장), 또는
+2. 환경변수 `AUTOAGENT_WORKSPACE`, 또는
+3. 실행 시 `--workspace <경로>`.
+
+CLI 명령명은 미지정/`"auto"`면 자동 감지합니다(`claude.cmd`→`claude`,
+`codex.cmd`→`codex` 순). 하네스는 매 실행 `~/.autoagent/home`에 자기 경로를
+기록(자기등록)하며, `/aa`·`/aar` 커맨드가 이 파일(또는 `AUTOAGENT_HOME` env)로
+클론 위치를 찾습니다.
 
 ## 구조
 

@@ -5,7 +5,8 @@ allowed-tools: Bash(python:*), Bash(git:*), Read, Glob
 ---
 
 You are driving the AutoAgent harness against the CURRENT project (the one this
-session is in). The harness lives at `C:\Users\systran\Desktop\AutoAgent`.
+session is in). The harness location (HARNESS) is resolved in section 1 —
+never hardcode it.
 
 ## 1. Parse arguments
 
@@ -19,16 +20,22 @@ Raw arguments: `$ARGUMENTS`
 - PROJECT = 현재 작업 디렉터리의 basename(예: `.../LanguageDetection` → `LanguageDetection`).
   이 이름으로 런을 `projects/<PROJECT>/`에 격리한다. config가 없으면 하네스가 현재 workspace로
   자동 생성한다.
+- HARNESS = 환경변수 `AUTOAGENT_HOME`이 있으면 그 값, 없으면 `~/.autoagent/home`
+  파일의 첫 줄(공백·CR 트림). Git Bash 예:
+  `HARNESS="${AUTOAGENT_HOME:-$(head -n1 ~/.autoagent/home 2>/dev/null | tr -d '\r')}"`
+  둘 다 비어 있으면 정지하고 사용자에게 안내한다: "하네스 클론 디렉터리에서
+  `python run.py --dry-run --workflow routed --task-type docs --workspace . --request "ping"`
+  을 한 번 실행하면 자동 등록됩니다."
 
 ## 2. Phase 1 — run the routed workflow
 
 Run (do NOT add `--require-human-approval`; the harness gates high-risk/db itself):
 
 ```
-python "C:\Users\systran\Desktop\AutoAgent\run.py" --workflow routed --task-type TYPE --max-review-rounds 1 --max-agent-calls N --project "PROJECT" --workspace . --request "REQUEST"
+python "<HARNESS>\run.py" --workflow routed --task-type TYPE --max-review-rounds 1 --max-agent-calls N --project "PROJECT" --workspace . --request "REQUEST"
 ```
 
-Substitute TYPE, N, PROJECT, REQUEST. From the output, capture the run directory from the
+Substitute HARNESS, TYPE, N, PROJECT, REQUEST. From the output, capture the run directory from the
 `RUN_DIR:` line. If there is no `RUN_DIR:` line, summarize stderr + exit code and stop.
 
 `--project "PROJECT"`로 런이 `projects/PROJECT/runs/<stamp>`에 격리된다. `RUN_DIR:`와

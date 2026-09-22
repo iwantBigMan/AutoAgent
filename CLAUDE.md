@@ -58,6 +58,10 @@ cross-model implement/review with human approval gates. Full reference: `README.
 - Windows + Git Bash; `LF will be replaced by CRLF` warnings on git ops are harmless.
 - Git Bash stdout은 한글을 cp949로 깨뜨린다 — 한글 파일 내용은 `cat`/표시 말고 **Read 도구(utf-8)**로 확인(ASCII 토큰 `grep`은 무방).
 - **Pushing to `main` is blocked** (default-branch protection) — use a feature branch + PR.
-- `autoagent.config.json` is **gitignored**; precedence: config file >
-  `AUTOAGENT_WORKSPACE` env > hardcoded default.
+- `autoagent.config.json` is **gitignored**; workspace precedence: config file >
+  `AUTOAGENT_WORKSPACE` env > **없으면 명시 요구**(하드코딩 기본값 제거 —
+  `cli.require_workspace`가 안내 종료). CLI 명령명은 미지정/`auto`면 자동 감지
+  (`claude.cmd`→`claude` 순, `config.autodetect_cli`). `cli.main()`은 매 실행
+  `~/.autoagent/home`에 자기 경로를 자기등록하고 /aa·/aar가 이를 읽는다
+  (`AUTOAGENT_HOME` env 우선).
 - MCP는 opt-in·**대칭**: 서버를 `mcp_servers`(→Claude)와 `~/.codex/config.toml [mcp_servers.*]`(→Codex) 양쪽에 넣는다(안 하면 `check_mcp_symmetry` 경고). `mcp_allowed_tools`는 Claude의 MCP 툴 allowlist — 리뷰어가 MCP로 편집/실행 못 하게 **읽기(내비) 툴만** 둔다.
