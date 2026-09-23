@@ -147,3 +147,65 @@ def test_scrub_removes_plus_encoded_key_with_space():
     out = oa._scrub(text, key)
     assert key not in out and quote(key, safe="") not in out and quote_plus(key, safe="") not in out
     assert out.count("***") == 3
+
+
+def _reg_with_overrides(tmp_path: Path) -> oa.Registry:
+    """key_param(오퍼레이션별)·type_param(서비스별) 오버라이드가 있는 레지스트리 픽스처."""
+    data = json.loads(json.dumps(FIXTURE))
+    data["services"]["bid_notice"]["operations"]["getBidCap"] = {
+        "purpose": "대문자 키 오퍼레이션", "params": {}, "key_param": "ServiceKey",
+    }
+    data["services"]["mois_like"] = {
+        "name": "테스트 안전정보", "data_go_kr_id": "3", "format": "json",
+        "base_url": "https://apis.data.go.kr/1741000/TestSafety", "type_param": "resultType",
+        "operations": {"getSafety": {"purpose": "안전정보 조회", "params": {}}},
+    }
+    return _reg(tmp_path, data)
+
+
+def test_build_url_honors_op_level_key_param_override(tmp_path):
+    reg = _reg_with_overrides(tmp_path)
+    call = oa.PlanCall(id="c1", service="bid_notice", operation="getBidCap", params={})
+    url = oa.build_url(reg, call, KEY)
+    assert "ServiceKey=" in url
+    assert "serviceKey=" not in url
+
+
+def test_build_url_key_param_cannot_be_overridden_by_planner_params(tmp_path):
+    # validate_plan은 대소문자 무관하게 serviceKey 계열 params를 걸러내지만(별도 테스트로 확인),
+    # build_url 자신도 key_param과 이름이 정확히 같은 planner params로 실제 키가 덮이지 않아야 한다.
+    reg = _reg_with_overrides(tmp_path)
+    call = oa.PlanCall(id="c1", service="bid_notice", operation="getBidCap", params={"ServiceKey": "attacker"})
+    url = oa.build_url(reg, call, KEY)
+    key_encoded = quote(KEY, safe="")
+    assert "attacker" not in url
+    assert f"ServiceKey={key_encoded}" in url
+
+
+def test_validate_plan_rejects_servicekey_case_insensitively(tmp_path):
+    reg = _reg_with_overrides(tmp_path)
+    plan = oa.parse_plan(_plan_text([
+        {"id": "c1", "service": "bid_notice", "operation": "getBidCap", "params": {"ServiceKey": "x"}},
+        {"id": "c2", "service": "bid_notice", "operation": "getBidCap", "params": {"SERVICEKEY": "x"}},
+    ]))
+    valid, rejected = oa.validate_plan(plan, reg, max_calls=10)
+    assert valid == []
+    reasons = {r["id"]: r["reason"] for r in rejected}
+    assert "serviceKey" in reasons["c1"] and "serviceKey" in reasons["c2"]
+
+
+def test_build_url_honors_service_level_type_param_override(tmp_path):
+    reg = _reg_with_overrides(tmp_path)
+    call = oa.PlanCall(id="c1", service="mois_like", operation="getSafety", params={})
+    url = oa.build_url(reg, call, KEY)
+    assert "resultType=json" in url
+    assert "type=json" not in url
+
+
+def test_redact_url_redacts_capitalized_servicekey(tmp_path):
+    reg = _reg_with_overrides(tmp_path)
+    call = oa.PlanCall(id="c1", service="bid_notice", operation="getBidCap", params={})
+    url = oa.build_url(reg, call, KEY)
+    red = oa.redact_url(url)
+    assert "SECRET" not in red
+    assert "ServiceKey=%2A%2A%2A" in red or "ServiceKey=***" in red

@@ -135,7 +135,7 @@ def validate_plan(plan: Plan, reg: Registry, max_calls: int) -> tuple[list[PlanC
             reason = f"미등록 service: {call.service}"
         elif call.operation not in (svc.get("operations") or {}):
             reason = f"미등록 operation: {call.operation}"
-        elif "serviceKey" in call.params:
+        elif any(k.lower() == "servicekey" for k in call.params):
             reason = "params에 serviceKey 금지(하네스가 주입)"
         elif len(valid) >= max_calls:
             reason = f"호출 상한 초과(max {max_calls})"
@@ -149,19 +149,29 @@ def validate_plan(plan: Plan, reg: Registry, max_calls: int) -> tuple[list[PlanC
 
 
 def build_url(reg: Registry, call: PlanCall, key: str) -> str:
-    """base_url/operation?serviceKey=...&type=json&params. 키는 Decoding 원문을 urlencode가 인코딩한다."""
+    """base_url/operation?<key_param>=...&<type_param>=json&params. 키는 Decoding 원문을 urlencode가 인코딩한다.
+
+    key_param(오퍼레이션별, 기본 serviceKey)과 type_param(서비스별, 기본 type)은
+    레지스트리 오버라이드를 따른다(예: user_info.getUnptRsttCorpInfo02는 ServiceKey,
+    mois_safety는 resultType). 인증키 파라미터는 계획 params로 덮어쓸 수 없도록
+    query.update(call.params) 이후에 마지막으로 설정한다.
+    """
     svc = reg.services[call.service]
-    query: dict[str, str] = {"serviceKey": key}
+    op_meta = (svc.get("operations") or {}).get(call.operation, {})
+    key_param = op_meta.get("key_param", "serviceKey")
+    type_param = svc.get("type_param", "type")
+    query: dict[str, str] = {}
     if svc["format"] == "json":
-        query["type"] = "json"
+        query[type_param] = "json"
     query.update(call.params)
+    query[key_param] = key
     return f"{svc['base_url'].rstrip('/')}/{call.operation}?{urlencode(query)}"
 
 
 def redact_url(url: str) -> str:
-    """serviceKey 값을 ***로 바꾼 URL(manifest 기록용)."""
+    """serviceKey(대소문자 무관, 예: ServiceKey) 값을 ***로 바꾼 URL(manifest 기록용)."""
     parts = urlsplit(url)
-    pairs = [(k, "***" if k == "serviceKey" else v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
+    pairs = [(k, "***" if k.lower() == "servicekey" else v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
 
 

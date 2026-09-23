@@ -259,7 +259,7 @@
       "data_go_kr_id": "15129466",
       "base_url": "https://apis.data.go.kr/1230000/ao/UsrInfoService02",
       "format": "json",
-      "note": "data.go.kr/data/15129466/openapi.do Swagger 재확인(swagger의 host=apis.data.go.kr, basePath=/1230000/ao/UsrInfoService02를 결합). 전체 5개 오퍼레이션을 모두 수록. getUnptRsttCorpInfo02는 스펙상 인증키 파라미터명이 다른 오퍼레이션과 달리 대문자 'ServiceKey'로 정의되어 있어 실제 호출 시 주의가 필요하다(하네스는 소문자 serviceKey로 주입).",
+      "note": "data.go.kr/data/15129466/openapi.do Swagger 재확인(swagger의 host=apis.data.go.kr, basePath=/1230000/ao/UsrInfoService02를 결합). 전체 5개 오퍼레이션을 모두 수록. getUnptRsttCorpInfo02는 스펙상 인증키 파라미터명이 대문자 'ServiceKey'이며 key_param 오버라이드로 하네스가 자동 적용한다.",
       "operations": {
         "getPrcrmntCorpBasicInfo02": {
           "purpose": "사업자등록번호나 업체명으로 조달업체 기본정보(주소·전화번호·대표자명)를 조회할 때 사용한다.",
@@ -306,7 +306,8 @@
             "inqryBgnDt": "조회 시작일시, YYYYMMDDHHMM(분단위)",
             "inqryEndDt": "조회 종료일시, YYYYMMDDHHMM(분단위)",
             "bizno": "사업자등록번호"
-          }
+          },
+          "key_param": "ServiceKey"
         }
       }
     },
@@ -486,12 +487,12 @@
       "data_go_kr_id": "15073554",
       "base_url": "https://apis.data.go.kr/1741000/FcltsSafetyInfoService2025",
       "format": "json",
-      "note": "data.go.kr/data/15073554/openapi.do Swagger 재확인(host=apis.data.go.kr/1741000/FcltsSafetyInfoService2025, 오퍼레이션명 일치). 재난관리책임기관이 공개하는 시설 안전점검·진단 결과 통합공개(전기/승강기/식품판매/어린이집/병원 등). 응답 형식 파라미터명이 resultType이며(하네스 공통 type이 아님) 대부분 오퍼레이션이 fclts_cd 단건조회 형태라, 목록 검색이 가능한 getFcltsInfoSearch_4를 포함해 대표 시설유형 3종만 추가 선정(전체 31개 중 4개). 서비스명 자체에 연도(2025)가 붙어 있어 향후 개정 시 바뀔 수 있음.",
+      "note": "data.go.kr/data/15073554/openapi.do Swagger 재확인(host=apis.data.go.kr/1741000/FcltsSafetyInfoService2025, 오퍼레이션명 일치). 재난관리책임기관이 공개하는 시설 안전점검·진단 결과 통합공개(전기/승강기/식품판매/어린이집/병원 등). 응답 형식 파라미터명이 resultType이며(하네스 공통 type이 아님) type_param 오버라이드로 자동 적용한다. 대부분 오퍼레이션이 fclts_cd 단건조회 형태라, 목록 검색이 가능한 getFcltsInfoSearch_4를 포함해 대표 시설유형 3종만 추가 선정(전체 31개 중 4개). 서비스명 자체에 연도(2025)가 붙어 있어 향후 개정 시 바뀔 수 있음.",
+      "type_param": "resultType",
       "operations": {
         "getFcltsInfoSearch_4": {
           "purpose": "시설명이나 법정동 주소코드로 대상 시설을 검색해 시설물 key(fclts_cd)를 얻을 때 사용한다(다른 세부조회 오퍼레이션의 입력값을 얻는 진입점).",
           "params": {
-            "resultType": "응답 형식(xml/json)",
             "fclts_nm": "시설물명",
             "ldong_addr_mgpl_sggu_cd": "법정동 시군구 코드"
           }
@@ -499,21 +500,18 @@
         "getBuildSafetyInfoSearch_4": {
           "purpose": "건축물의 안전점검일자·점검종류·점검결과를 조회할 때 사용한다(fclts_cd 필요).",
           "params": {
-            "resultType": "응답 형식(xml/json)",
             "fclts_cd": "시설물 key(getFcltsInfoSearch_4로 조회)"
           }
         },
         "getScleqipSafetyInfoSearch_4": {
           "purpose": "학교시설의 안전점검 결과를 조회할 때 사용한다(fclts_cd 필요).",
           "params": {
-            "resultType": "응답 형식(xml/json)",
             "fclts_cd": "시설물 key(getFcltsInfoSearch_4로 조회)"
           }
         },
         "getCrSafetyInfoSearch_4": {
           "purpose": "어린이집의 안전점검 결과를 조회할 때 사용한다(fclts_cd 필요).",
           "params": {
-            "resultType": "응답 형식(xml/json)",
             "fclts_cd": "시설물 key(getFcltsInfoSearch_4로 조회)"
           }
         }

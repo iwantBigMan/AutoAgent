@@ -27,3 +27,9 @@ def test_default_registry_has_usable_core_ops():
 def test_catalog_renders_without_placeholders():
     md = oa.render_catalog_md(oa.load_registry())
     assert "{{" not in md and "확인필요" not in md
+
+
+def test_registry_declares_key_param_and_type_param_overrides():
+    reg = oa.load_registry()
+    assert reg.services["user_info"]["operations"]["getUnptRsttCorpInfo02"]["key_param"] == "ServiceKey"
+    assert reg.services["mois_safety"]["type_param"] == "resultType"
