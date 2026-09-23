@@ -1,0 +1,141 @@
+"""data.go.kr OpenAPI 수집기 단위테스트(네트워크·모델 호출 없음, fetch 주입)."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+
+from autoagent.data import openapi as oa
+
+KEY = "SECRET+KEY/==abc"
+
+FIXTURE = {
+    "services": {
+        "bid_notice": {
+            "name": "테스트 입찰공고", "data_go_kr_id": "1", "format": "json",
+            "base_url": "https://apis.data.go.kr/1230000/TestBidService",
+            "operations": {"getBidList": {"purpose": "공고 목록", "params": {"inqryDiv": "1"}}},
+        },
+        "no_ops": {
+            "name": "상세기능 미확인", "data_go_kr_id": "2", "format": "xml",
+            "base_url": "https://apis.data.go.kr/1230000/NoOps", "operations": {}, "note": "참고문서 확인 필요",
+        },
+    },
+    "common_params": {"numOfRows": "페이지 크기", "pageNo": "페이지"},
+}
+
+
+def _reg(tmp_path: Path, data: dict = FIXTURE) -> oa.Registry:
+    p = tmp_path / "reg.json"
+    p.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    return oa.load_registry(p)
+
+
+def _plan_text(calls: list[dict]) -> str:
+    return f"자유 서술\n\n{oa.PLAN_MARKER}\n```json\n{json.dumps({'calls': calls}, ensure_ascii=False)}\n```\n"
+
+
+def _ok_body(n: int = 2) -> str:
+    return json.dumps({"response": {"header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE"},
+                                    "body": {"items": [{"a": i} for i in range(n)], "totalCount": n}}})
+
+
+def test_load_registry_rejects_bad_host(tmp_path):
+    bad = json.loads(json.dumps(FIXTURE))
+    bad["services"]["bid_notice"]["base_url"] = "https://evil.example.com/x"
+    with pytest.raises(ValueError):
+        _reg(tmp_path, bad)
+
+
+def test_render_catalog_lists_ops_and_marks_empty(tmp_path):
+    md = oa.render_catalog_md(_reg(tmp_path))
+    assert "bid_notice" in md and "getBidList" in md and "numOfRows" in md
+    assert "계획에 포함하지 말 것" in md  # no_ops 서비스 표시
+
+
+def test_parse_plan_marker_and_failures():
+    plan = oa.parse_plan(_plan_text([{"id": "c1", "service": "bid_notice", "operation": "getBidList",
+                                      "params": {"inqryDiv": 1}, "purpose": "p"}]))
+    assert plan.error is None and plan.calls[0].params == {"inqryDiv": "1"}
+    assert oa.parse_plan("마커 없음").error
+    assert oa.parse_plan(f"{oa.PLAN_MARKER}\n```json\n{{broken\n```").error
+
+
+def test_validate_plan_rejects_unknown_and_caps(tmp_path):
+    reg = _reg(tmp_path)
+    plan = oa.parse_plan(_plan_text([
+        {"id": "c1", "service": "bid_notice", "operation": "getBidList", "params": {}},
+        {"id": "c1", "service": "bid_notice", "operation": "getBidList", "params": {}},   # 중복 id
+        {"id": "c2", "service": "nope", "operation": "x", "params": {}},                  # 미등록 service
+        {"id": "c3", "service": "bid_notice", "operation": "getOther", "params": {}},      # 미등록 operation
+        {"id": "c4", "service": "bid_notice", "operation": "getBidList", "params": {"serviceKey": "x"}},
+        {"id": "c5", "service": "bid_notice", "operation": "getBidList", "params": {}},
+    ]))
+    valid, rejected = oa.validate_plan(plan, reg, max_calls=1)
+    assert [c.id for c in valid] == ["c1"]
+    reasons = {r["id"]: r["reason"] for r in rejected}
+    assert "중복" in reasons["c1"] and "service" in reasons["c2"] and "operation" in reasons["c3"]
+    assert "serviceKey" in reasons["c4"] and "상한" in reasons["c5"]
+
+
+def test_build_and_redact_url(tmp_path):
+    reg = _reg(tmp_path)
+    call = oa.PlanCall(id="c1", service="bid_notice", operation="getBidList", params={"inqryDiv": "1"})
+    url = oa.build_url(reg, call, KEY)
+    assert url.startswith("https://apis.data.go.kr/1230000/TestBidService/getBidList?")
+    assert "type=json" in url and "inqryDiv=1" in url and KEY not in url  # 키는 URL 인코딩됨
+    red = oa.redact_url(url)
+    assert "serviceKey=%2A%2A%2A" in red or "serviceKey=***" in red
+    assert "SECRET" not in red
+
+
+def test_execute_plan_success_error_timeout_xml(tmp_path):
+    reg = _reg(tmp_path)
+    calls = [oa.PlanCall("c1", "bid_notice", "getBidList", {}),
+             oa.PlanCall("c2", "bid_notice", "getBidList", {}),
+             oa.PlanCall("c3", "bid_notice", "getBidList", {}),
+             oa.PlanCall("c4", "bid_notice", "getBidList", {})]
+    seen: list[str] = []
+
+    def fake_fetch(url: str, timeout: int) -> oa.FetchResult:
+        seen.append(url)
+        n = len(seen)
+        if n == 1:
+            # 서버가 키를 본문에 에코하는 최악 케이스(JSON 유효성은 유지)
+            return oa.FetchResult(200, _ok_body(3).replace("NORMAL SERVICE", f"NORMAL SERVICE {KEY}"))
+        if n == 2:
+            return oa.FetchResult(500, "server error")
+        if n == 3:
+            raise TimeoutError("timed out")
+        return oa.FetchResult(200, "<response><header><resultCode>00</resultCode></header></response>")
+
+    items = oa.execute_plan(calls, reg, KEY, tmp_path, fetch=fake_fetch, pause_seconds=0)
+    key_encoded = quote(KEY, safe="")
+    assert len(items) == 4 and all(key_encoded in u for u in seen)  # 실제 URL에는 키가 들어간다(URL 인코딩된 형태로)
+    ok, err, to, xml = items
+    assert ok.http_status == 200 and ok.result_code == "00" and ok.row_count == 3 and ok.error is None
+    assert ok.snapshot_path == "openapi/c1.json"
+    assert KEY not in (tmp_path / ok.snapshot_path).read_text(encoding="utf-8")  # 저장 본문 scrub
+    assert err.error and "500" in err.error
+    assert to.error and "TimeoutError" in to.error and to.snapshot_path is None
+    assert xml.snapshot_path == "openapi/c4.xml"
+    for it in items:
+        assert KEY not in json.dumps(oa.asdict(it))  # manifest 항목 어디에도 키 없음
+
+
+def test_manifest_and_summary(tmp_path):
+    reg = _reg(tmp_path)
+    items = oa.execute_plan([oa.PlanCall("c1", "bid_notice", "getBidList", {}, "목적")], reg, KEY, tmp_path,
+                            fetch=lambda u, t: oa.FetchResult(200, _ok_body(1)), pause_seconds=0)
+    oa.write_manifest(tmp_path, items, [{"id": "c9", "reason": "미등록 service"}], plan_error=None)
+    data = json.loads((tmp_path / "openapi_manifest.json").read_text(encoding="utf-8"))
+    assert data["items"][0]["id"] == "c1" and data["rejected"][0]["id"] == "c9"
+    md = oa.render_openapi_summary(tmp_path)
+    assert "c1" in md and "getBidList" in md and str(tmp_path / "openapi" / "c1.json") in md
+    assert "거부된 계획 1건" in md and "source_refs" in md
+
+
+def test_summary_without_manifest(tmp_path):
+    assert oa.render_openapi_summary(tmp_path) == "(공공데이터 스냅샷 없음)"
