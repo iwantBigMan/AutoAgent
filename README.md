@@ -442,6 +442,27 @@ Docs/review/read-only 라우트는 다음도 생성할 수 있습니다:
 05_claude_final_report.md
 ```
 
+## Research 워크플로우
+
+`--workflow research`(또는 `/aar`)는 회사·시장·CSV·웹 팩트를 조사해 교차모델 검증을 거친 인용
+HTML 리포트를 냅니다. seed 직후 `01_openapi_plan` 스테이지(Claude light)가 data.go.kr 승인
+OpenAPI 카탈로그에서 수집계획을 내면 하네스가 실행해 `openapi/*.json`(또는 `.xml`) 스냅샷과
+`openapi_manifest.json`을 남깁니다.
+
+### 공공데이터(data.go.kr) OpenAPI 수집
+
+- **키 설정**: `autoagent.config.json`의 `data_go_kr_service_key` > env `DATA_GO_KR_SERVICE_KEY`
+  순으로 읽습니다(`autoagent/config.py`). 둘 다 없으면 이 수집 스테이지는 조용히 생략됩니다.
+- **레지스트리 확장**: 허용 서비스/오퍼레이션은 `autoagent/data/openapi_registry.json`에 고정되어
+  있습니다. 새 승인 서비스를 쓰려면 이 JSON에 `service`/`operations` 항목을 추가하면 카탈로그
+  렌더링과 계획 검증에 자동 반영됩니다(코드 수정 불필요). 인증키 파라미터명이 `serviceKey`가
+  아니거나(예: `user_info.getUnptRsttCorpInfo02`의 `ServiceKey`) 응답형식 파라미터명이 `type`이
+  아닌 서비스(예: `mois_safety`의 `resultType`)는 각각 오퍼레이션/서비스 레벨에서
+  `key_param`/`type_param`으로 오버라이드합니다.
+- **라이브 스모크**: `python scripts/openapi_smoke.py [service_id] [operation] [k=v ...]`로
+  레지스트리 오퍼레이션 1건을 `numOfRows=1`로 실제 호출해 키·엔드포인트·파라미터가 맞는지
+  확인합니다. pytest 대상이 아니며 출력에 키·전체 URL을 남기지 않습니다.
+
 ## `/aa` 커맨드 (Claude CLI)
 
 Claude Code 세션 안에서 AutoAgent를 돌리고, 게이트에 걸리면 CLI에서 승인해 바로 구현까지 이어가는 단일 커맨드입니다.

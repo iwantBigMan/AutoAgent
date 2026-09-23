@@ -29,6 +29,9 @@ cross-model implement/review with human approval gates. Full reference: `README.
   리포트. 코어 `autoagent/research/**`·`autoagent/data/**`, 오케스트레이터 `autoagent/workflows/research.py`,
   프롬프트 `prompts/research/*.md`. 설계 문서: `docs/superpowers/specs|plans/*research*`. 실행: `/aar` 또는
   `run.py --workflow research --request "..."` (+`--auto-approve-nonbranch`/`--resume`).
+  seed 직후 `01_openapi_plan`(Claude light)이 data.go.kr 승인 OpenAPI 수집계획을 내고 하네스가
+  실행해 `openapi/*.json`+`openapi_manifest.json`을 남긴다(레지스트리 `autoagent/data/openapi_registry.json`,
+  키 `data_go_kr_service_key`/env `DATA_GO_KR_SERVICE_KEY`, 없으면 생략). 라이브 확인은 `scripts/openapi_smoke.py`.
 - `autoagent/workflows/routed_*.py` split by phase: `routed_preamble` (plan),
   `routed_impl` (implement/review loop), `routed_docs` (read-only), `routed_common` (gates),
   plus `task_exec.py` (decompose's parallel executor).
@@ -43,8 +46,8 @@ cross-model implement/review with human approval gates. Full reference: `README.
 - **routed/decompose = no unit tests** → verify with dry-run:
   `python .\run.py --dry-run --workflow routed --task-type backend --request "..."`
   (renders every prompt + `*_command.json`, no CLI invoked; dry-run never counts against `--max-agent-calls`).
-- **`research` subsystem HAS a deterministic pytest suite** (`autoagent/research/**`·`autoagent/data/**`, pytest.ini):
-  `python -m pytest tests/ -q` (~171 tests). 모델 호출부는 여전히 dry-run으로:
+- **`research` subsystem HAS a deterministic pytest suite** (`autoagent/research/**`·`autoagent/data/**`,
+  `tests/data/**` 포함, pytest.ini): `python -m pytest tests/ -q` (~245 tests). 모델 호출부는 여전히 dry-run으로:
   `python run.py --dry-run --workflow research --request "..."` (a→b→c→d→derive 전 스테이지 순회 후 exit 0).
 - 리서치 워크플로는 **pytest + dry-run까지만 검증** — 실모델 라이브 런 미실증(사용자 인계). "구현됨"을 "실전 검증됨"으로 단정 말 것.
 
