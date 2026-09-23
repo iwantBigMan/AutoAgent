@@ -274,3 +274,17 @@ def test_execute_plan_honors_service_ok_codes(tmp_path):
                             reg, "KEY", tmp_path, fetch=lambda u, t: oa.FetchResult(200, kisa_body), pause_seconds=0)
     assert items[0].result_code == "10000" and items[0].error is None
     assert items[1].error is not None and "10000" in items[1].error
+
+
+def test_validate_plan_rejects_override_param_names_and_redaction_is_value_based(tmp_path):
+    """key_param/type_param 이름도 계획 params에서 거부하고, url_redacted는 파라미터명과 무관하게 키 값을 지운다."""
+    reg = _reg_with_overrides(tmp_path)
+    plan = oa.Plan([oa.PlanCall("k1", "bid_notice", "getBidCap", {"ServiceKey": "x"}),
+                    oa.PlanCall("t1", "mois_like", "getSafety", {"resultType": "xml"}),
+                    oa.PlanCall("ok", "mois_like", "getSafety", {"pageNo": "1"})])
+    valid, rejected = oa.validate_plan(plan, reg, 10)
+    assert [c.id for c in valid] == ["ok"] and {r["id"] for r in rejected} == {"k1", "t1"}
+    key = "SECRET+KEY/==abc"
+    items = oa.execute_plan([oa.PlanCall("k2", "bid_notice", "getBidCap", {})], reg, key, tmp_path,
+                            fetch=lambda u, t: oa.FetchResult(200, _ok_body(1)), pause_seconds=0)
+    assert key not in items[0].url_redacted and quote_plus(key, safe="") not in items[0].url_redacted

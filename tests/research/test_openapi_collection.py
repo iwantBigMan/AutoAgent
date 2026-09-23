@@ -101,3 +101,16 @@ def test_config_key_precedence(tmp_path, monkeypatch):
     p.write_text('{"workspace": ".", "data_go_kr_service_key": "CFGKEY", "openapi_max_calls": 3}', encoding="utf-8")
     cfg = config_mod.load_config(p)
     assert cfg.data_go_kr_service_key == "CFGKEY" and cfg.openapi_max_calls == 3
+
+
+def test_plan_step_failure_is_skipped_not_fatal(tmp_path, capsys, monkeypatch):
+    """계획 스텝이 SystemExit(CLI 비정상 종료)로 죽어도 수집만 생략되고 리서치는 계속된다."""
+    ctx = _ctx(tmp_path, "KEY")
+
+    def boom(ctx_, **kw):
+        raise SystemExit(1)
+
+    monkeypatch.setattr(research_mod, "_run_agent_step", boom)
+    research_mod._run_openapi_collection(ctx)
+    assert ctx.state["openapi"] == {"skipped": "error: SystemExit"}
+    assert "[openapi]" in capsys.readouterr().out

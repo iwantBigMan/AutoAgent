@@ -212,24 +212,32 @@ def _run_openapi_collection(ctx: "ResearchContext", *, fetch=None) -> None:
         state["openapi"] = {"skipped": f"registry: {exc}"}
         _persist_state(ctx)
         return
-    plan_out = _run_agent_step(
-        ctx, agent="claude", role_id="openapi_planner", name="01_openapi_plan",
-        prompt_name="openapi_plan.md",
-        prompt_values={"REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
-                       "OPENAPI_CATALOG": render_catalog_md(registry), "MAX_CALLS": str(ctx.config.openapi_max_calls)},
-        next_step="openapi_plan",
-        dry_output=f'{PLAN_MARKER}\n```json\n{{"calls": []}}\n```\n',
-        charge_budget=False,  # refine 콜과 동격: --max-agent-calls와 별도 계정(CLAUDE.md).
-    )
-    plan = parse_plan(plan_out)
-    if plan.error:
-        write_text(ctx.run_dir / "01_openapi_plan_error.txt", plan.error)
-    valid, rejected = validate_plan(plan, registry, ctx.config.openapi_max_calls)
-    items = []
-    if valid and not ctx.args.dry_run:
-        kwargs = {"fetch": fetch} if fetch is not None else {}
-        items = execute_plan(valid, registry, key or "", ctx.run_dir, **kwargs)
-    write_manifest(ctx.run_dir, items, rejected, plan.error)
+    # 선택 스테이지라 계획 스텝(CLI 비정상 종료=SystemExit, 타임아웃)·실행·기록 어디서 실패해도
+    # 리서치 본체를 중단시키지 않고 생략으로 기록한다(스펙 오류 처리 절).
+    try:
+        plan_out = _run_agent_step(
+            ctx, agent="claude", role_id="openapi_planner", name="01_openapi_plan",
+            prompt_name="openapi_plan.md",
+            prompt_values={"REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
+                           "OPENAPI_CATALOG": render_catalog_md(registry), "MAX_CALLS": str(ctx.config.openapi_max_calls)},
+            next_step="openapi_plan",
+            dry_output=f'{PLAN_MARKER}\n```json\n{{"calls": []}}\n```\n',
+            charge_budget=False,  # refine 콜과 동격: --max-agent-calls와 별도 계정(CLAUDE.md).
+        )
+        plan = parse_plan(plan_out)
+        if plan.error:
+            write_text(ctx.run_dir / "01_openapi_plan_error.txt", plan.error)
+        valid, rejected = validate_plan(plan, registry, ctx.config.openapi_max_calls)
+        items = []
+        if valid and not ctx.args.dry_run:
+            kwargs = {"fetch": fetch} if fetch is not None else {}
+            items = execute_plan(valid, registry, key or "", ctx.run_dir, **kwargs)
+        write_manifest(ctx.run_dir, items, rejected, plan.error)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - 수집 실패가 리서치를 막으면 안 된다
+        print(f"[openapi] 수집 스테이지 실패 - 생략하고 리서치를 계속합니다: {type(exc).__name__}")
+        state["openapi"] = {"skipped": f"error: {type(exc).__name__}"}
+        _persist_state(ctx)
+        return
     state["openapi"] = {"calls": len(valid), "rejected": len(rejected),
                         "errors": sum(1 for it in items if it.error), "manifest": "openapi_manifest.json"}
     _persist_state(ctx)
