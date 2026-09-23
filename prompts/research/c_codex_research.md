@@ -19,6 +19,10 @@
 # 입력 CSV 경로
 {{CSV_PATHS}}
 
+# 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
+{{OPENAPI_DATA}}
+위 파일은 절대경로로 직접 읽을 수 있다(read-only). 수치·목록 근거로 우선 활용하라.
+
 # 루프 컨텍스트
 - outer_pass: {{OUTER_PASS}}
 - inner_round: {{INNER_ROUND}}

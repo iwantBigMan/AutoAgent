@@ -11,5 +11,6 @@
   "codex_reasoning_effort": "medium",
   "codex_high_risk_effort": "high",
   "default_max_agent_calls_review": 5,
-  "default_max_agent_calls_implementation": 9
+  "default_max_agent_calls_implementation": 9,
+  "data_go_kr_service_key": ""
 }

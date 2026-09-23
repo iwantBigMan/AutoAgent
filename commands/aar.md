@@ -101,3 +101,4 @@ Read `<RUN_DIR>/gate_status.json` if it exists.
 - Remind the user: 무료 소스(웹 + 로컬 CSV)만 사용하며, 리포트의 사실 주장엔 인용이 붙는다.
   커버리지 100% 미만이면 리포트 상단에 경고 배너가 그 사실을 표시한다. 하네스는 커밋/푸시를
   하지 않는다.
+- 공공데이터(data.go.kr) 수집 결과는 `<RUN_DIR>/openapi_manifest.json`에 남는다.

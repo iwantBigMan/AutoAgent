@@ -12,7 +12,8 @@ def test_c_prompt_renders_all_placeholders() -> None:
     rendered = render_template(
         "c_codex_research.md",
         {"WORKSPACE": "C:/ws", "REQUEST": "고객 CSV 정제", "SEED_PIN": '{"currency": "KRW"}',
-         "CSV_PATHS": "data/customers.csv", "OUTER_PASS": "1", "INNER_ROUND": "1", "PRIOR_FEEDBACK": ""},
+         "CSV_PATHS": "data/customers.csv", "OUTER_PASS": "1", "INNER_ROUND": "1", "PRIOR_FEEDBACK": "",
+         "OPENAPI_DATA": "(공공데이터 스냅샷 없음)"},
     )
     assert "{{" not in rendered
     assert "transform_manifest" in rendered

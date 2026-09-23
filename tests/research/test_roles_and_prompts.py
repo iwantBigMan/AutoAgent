@@ -55,6 +55,7 @@ def test_prompts_render_with_placeholders() -> None:
         "STAGE_A_OUTPUT": "a 산출물",
         "DERIVE_OUTPUT": "derive 산출물",
         "REPORT_BODY_MD": "# 리포트",
+        "OPENAPI_DATA": "(공공데이터 스냅샷 없음)",
     }
     for name in ["seed_contract.md", "a_researcher.md", "crossmodel_verifier.md", "derive.md", "final_html_report.md"]:
         text = render_template(name, values)

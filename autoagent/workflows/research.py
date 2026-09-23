@@ -26,6 +26,10 @@ from autoagent.artifacts import (
     write_text,
 )
 from autoagent.config import Config
+from autoagent.data.openapi import (
+    PLAN_MARKER, execute_plan, load_registry, parse_plan, render_catalog_md, render_openapi_summary,
+    validate_plan, write_manifest,
+)
 from autoagent.research.adapters import verify
 from autoagent.research.convergence import decide_outer_pass, diff_verified_claims
 from autoagent.research.coverage import (
@@ -138,10 +142,13 @@ def _run_agent_step(
     prompt_values: dict[str, str],
     next_step: str,
     dry_output: str,
+    charge_budget: bool = True,
 ) -> str:
     """리서치 스텝 1회 실행(dry-run이면 프롬프트/커맨드만 렌더). routed의 run_role_step 축약판.
 
     command_for_agent는 순환 import 방지를 위해 지연 import한다(레포 관례).
+    charge_budget=False면 AgentCallBudget 소모 없이 호출한다(01_openapi_plan처럼
+    refine 콜과 동격으로 --max-agent-calls와 별도 계정할 스텝용).
     """
     from autoagent.workflows.routed_impl import command_for_agent
 
@@ -153,17 +160,27 @@ def _run_agent_step(
     resolved = resolve_role(
         roles[role_id], config=config, route=route, request=ctx.request, agent=agent, read_only=args.read_only
     )
+    # 리서치는 코드 계획이 아니라 웹 조사다. non-mutating 공통 정책이 주는 plan 모드는
+    # 헤드리스에서 "코드 변경 계획" 프레임으로 리서치 요청 거부를 유발하고(20260921_111823
+    # stage a blocked 실측), 웹 도구가 allowlist에 없으면 승인 TTY가 없어 호출이 전부
+    # 거부된다. claude 리서치 스텝만 기본 권한 모드 + 웹 도구 allowlist로 실행한다.
+    # (편집/Bash는 allowlist 밖이라 여전히 승인 불가=거부 → read-only 성격은 유지된다.)
+    allowed_tools = None
+    if resolved.agent == "claude" and not resolved.mutating:
+        resolved.permission_mode = None
+        allowed_tools = [*config.mcp_allowed_tools, "WebSearch", "WebFetch"]
     prompt = render_template(prompt_name, prompt_values)
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", prompt)
-        write_command_artifact(run_dir, name, command_for_agent(config, resolved))
+        write_command_artifact(run_dir, name, command_for_agent(config, resolved, allowed_tools=allowed_tools))
         return dry_output
 
     command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
-    ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
+    if charge_budget:
+        ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
-        command=command_for_agent(config, resolved, resolved_command=command_name),
+        command=command_for_agent(config, resolved, resolved_command=command_name, allowed_tools=allowed_tools),
         prompt=prompt,
         cwd=config.workspace,
         out_dir=run_dir,
@@ -171,6 +188,51 @@ def _run_agent_step(
     )
     write_text(run_dir / f"{name}.md", result)
     return result
+
+
+def _run_openapi_collection(ctx: "ResearchContext", *, fetch=None) -> None:
+    """seed pin 직후 1회: 계획(Claude light) → 레지스트리 검증 → 실행 → openapi_manifest.json.
+
+    state["openapi"]가 있으면(재개) 스킵한다. 키가 없거나 레지스트리를 못 읽으면 경고만 남기고
+    생략해 리서치 본체는 계속 진행한다. fetch는 테스트 주입용(None이면 기본 urllib).
+    """
+    state = ctx.state
+    if state.get("openapi") is not None:
+        return
+    key = ctx.config.data_go_kr_service_key
+    if not key and not ctx.args.dry_run:
+        print("[openapi] 인증키 없음 - 공공데이터 수집을 생략합니다(config data_go_kr_service_key 또는 env DATA_GO_KR_SERVICE_KEY)")
+        state["openapi"] = {"skipped": "no_key"}
+        _persist_state(ctx)
+        return
+    try:
+        registry = load_registry()
+    except (OSError, ValueError) as exc:
+        print(f"[openapi] 레지스트리 로드 실패 - 수집 생략: {exc}")
+        state["openapi"] = {"skipped": f"registry: {exc}"}
+        _persist_state(ctx)
+        return
+    plan_out = _run_agent_step(
+        ctx, agent="claude", role_id="openapi_planner", name="01_openapi_plan",
+        prompt_name="openapi_plan.md",
+        prompt_values={"REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
+                       "OPENAPI_CATALOG": render_catalog_md(registry), "MAX_CALLS": str(ctx.config.openapi_max_calls)},
+        next_step="openapi_plan",
+        dry_output=f'{PLAN_MARKER}\n```json\n{{"calls": []}}\n```\n',
+        charge_budget=False,  # refine 콜과 동격: --max-agent-calls와 별도 계정(CLAUDE.md).
+    )
+    plan = parse_plan(plan_out)
+    if plan.error:
+        write_text(ctx.run_dir / "01_openapi_plan_error.txt", plan.error)
+    valid, rejected = validate_plan(plan, registry, ctx.config.openapi_max_calls)
+    items = []
+    if valid and not ctx.args.dry_run:
+        kwargs = {"fetch": fetch} if fetch is not None else {}
+        items = execute_plan(valid, registry, key or "", ctx.run_dir, **kwargs)
+    write_manifest(ctx.run_dir, items, rejected, plan.error)
+    state["openapi"] = {"calls": len(valid), "rejected": len(rejected),
+                        "errors": sum(1 for it in items if it.error), "manifest": "openapi_manifest.json"}
+    _persist_state(ctx)
 
 
 def _seed_fields(ctx: "ResearchContext") -> dict[str, str]:
@@ -318,6 +380,7 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             "CSV_PATHS": getattr(ctx.config, "research_csv_paths", "") or "(워크스페이스의 입력 CSV)",
             # crossmodel 검증기의 최소 findings 쿼터(config crossmodel_min_findings, 기본 3).
             "MIN_FINDINGS": str(getattr(ctx.config, "crossmodel_min_findings", 3)),
+            "OPENAPI_DATA": render_openapi_summary(ctx.run_dir),
         }
         values.update(_seed_fields(ctx))  # SEED_COMPANY/MARKET/CURRENCY/PERIOD/UNIT/AS_OF 분해 주입
         if ctx.tiered is not None and not ctx.args.dry_run:
@@ -474,6 +537,7 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
                                       "base_currency": "KRW", "period": "-", "unit": "-"})
     else:
         ctx.seed_contract = json.dumps(state["seed_pin"], ensure_ascii=False)
+    _run_openapi_collection(ctx)
 
     resume_outer, _resume_stage, _resume_inner = resume_point(state)
     prev_claims: list[dict] = state.get("verified_claims", [])

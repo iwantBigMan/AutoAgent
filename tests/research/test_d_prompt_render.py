@@ -17,6 +17,7 @@ def test_d_researcher_prompt_renders_all_placeholders() -> None:
             "SEED_PIN": '{"company": "Acme"}',
             "PRIOR_STAGE_SUMMARY": "-",
             "PRIOR_VERDICT_FEEDBACK": "-",
+            "OPENAPI_DATA": "(공공데이터 스냅샷 없음)",
         },
     )
     assert "{{" not in rendered

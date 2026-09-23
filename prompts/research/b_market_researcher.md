@@ -14,6 +14,9 @@
 이 seed는 첫 pass에서 확정돼 pin됐다. **너는 이 값을 재정의·변경할 수 없다.**
 시장 규모/환율/주가 같은 시점 의존 수치엔 반드시 `as_of` 날짜를 붙여라.
 
+## 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
+{{OPENAPI_DATA}}
+
 ## 이번 심화 컨텍스트
 - outer_pass: {{OUTER_PASS}} (1=개괄, 2=정밀 심화)
 - inner_round: {{INNER_ROUND}}

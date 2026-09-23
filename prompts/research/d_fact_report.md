@@ -9,6 +9,9 @@
 - 선행 스테이지 요약: {{PRIOR_STAGE_SUMMARY}}
 - 직전 검증 피드백(있으면 반영): {{PRIOR_VERDICT_FEEDBACK}}
 
+## 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
+{{OPENAPI_DATA}}
+
 ## 도구
 - **웹은 너만 쓴다**: `WebSearch`로 후보를 찾고 `WebFetch`로 원문을 가져와라. 긴 페이지는
   `defuddle`로 클린화해라. 검증기(Codex)는 웹을 못 쓰고 네가 남긴 스냅샷만 읽는다.

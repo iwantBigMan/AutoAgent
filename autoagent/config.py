@@ -107,6 +107,9 @@ class Config:
     research_max_capture_chars: int = 12000
     # solo 폴백: 설정되면 살아 있는 이 프로바이더가 전 역할을 겸직한다(null=교차모델 현행).
     solo_provider: str | None = None
+    # data.go.kr OpenAPI 인증키(config > env DATA_GO_KR_SERVICE_KEY). None이면 리서치의 공공데이터 수집 생략.
+    data_go_kr_service_key: str | None = None
+    openapi_max_calls: int = 12  # 리서치 1회당 수집계획 호출 상한
 
 
 def load_config(path: Path, project: str | None = None) -> Config:
@@ -202,4 +205,6 @@ def load_config(path: Path, project: str | None = None) -> Config:
         verification_timeout_seconds=int(raw.get("verification_timeout_seconds") or 1800),
         tiers=tiers,
         solo_provider=solo_provider,
+        data_go_kr_service_key=(raw.get("data_go_kr_service_key") or os.environ.get("DATA_GO_KR_SERVICE_KEY") or None),
+        openapi_max_calls=int(raw.get("openapi_max_calls") or 12),
     )
