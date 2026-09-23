@@ -122,6 +122,13 @@ def parse_plan(raw: str) -> Plan:
     return Plan(calls)
 
 
+def _reserved_param_names(svc: dict, operation: str) -> set[str]:
+    """하네스가 주입하는 파라미터명(소문자): serviceKey + 오퍼레이션 key_param, type + 서비스 type_param."""
+    op_meta = (svc.get("operations") or {}).get(operation) or {}
+    return {"servicekey", str(op_meta.get("key_param", "serviceKey")).lower(),
+            "type", str(svc.get("type_param", "type")).lower()}
+
+
 def validate_plan(plan: Plan, reg: Registry, max_calls: int) -> tuple[list[PlanCall], list[dict[str, str]]]:
     """레지스트리에 있는 service/operation만 통과시키고 나머지는 거부 사유와 함께 돌려준다."""
     valid: list[PlanCall] = []
@@ -135,8 +142,8 @@ def validate_plan(plan: Plan, reg: Registry, max_calls: int) -> tuple[list[PlanC
             reason = f"미등록 service: {call.service}"
         elif call.operation not in (svc.get("operations") or {}):
             reason = f"미등록 operation: {call.operation}"
-        elif any(k.lower() == "servicekey" for k in call.params):
-            reason = "params에 serviceKey 금지(하네스가 주입)"
+        elif any(k.lower() in _reserved_param_names(svc, call.operation) for k in call.params):
+            reason = "params에 serviceKey/type 등 하네스 주입 파라미터 금지"
         elif len(valid) >= max_calls:
             reason = f"호출 상한 초과(max {max_calls})"
         else:
@@ -280,7 +287,7 @@ def execute_plan(
         url = build_url(reg, call, key)
         item = ManifestItem(
             id=call.id, service=call.service, operation=call.operation, purpose=call.purpose,
-            url_redacted=redact_url(url), fetch_ts=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            url_redacted=_scrub(redact_url(url), key), fetch_ts=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
         try:
             result = fetch(url, timeout)
