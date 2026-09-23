@@ -153,17 +153,26 @@ def _run_agent_step(
     resolved = resolve_role(
         roles[role_id], config=config, route=route, request=ctx.request, agent=agent, read_only=args.read_only
     )
+    # 리서치는 코드 계획이 아니라 웹 조사다. non-mutating 공통 정책이 주는 plan 모드는
+    # 헤드리스에서 "코드 변경 계획" 프레임으로 리서치 요청 거부를 유발하고(20260921_111823
+    # stage a blocked 실측), 웹 도구가 allowlist에 없으면 승인 TTY가 없어 호출이 전부
+    # 거부된다. claude 리서치 스텝만 기본 권한 모드 + 웹 도구 allowlist로 실행한다.
+    # (편집/Bash는 allowlist 밖이라 여전히 승인 불가=거부 → read-only 성격은 유지된다.)
+    allowed_tools = None
+    if resolved.agent == "claude" and not resolved.mutating:
+        resolved.permission_mode = None
+        allowed_tools = [*config.mcp_allowed_tools, "WebSearch", "WebFetch"]
     prompt = render_template(prompt_name, prompt_values)
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", prompt)
-        write_command_artifact(run_dir, name, command_for_agent(config, resolved))
+        write_command_artifact(run_dir, name, command_for_agent(config, resolved, allowed_tools=allowed_tools))
         return dry_output
 
     command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
     ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
-        command=command_for_agent(config, resolved, resolved_command=command_name),
+        command=command_for_agent(config, resolved, resolved_command=command_name, allowed_tools=allowed_tools),
         prompt=prompt,
         cwd=config.workspace,
         out_dir=run_dir,

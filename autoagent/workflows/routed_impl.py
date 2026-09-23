@@ -378,8 +378,13 @@ def command_for_agent(
     config: Config,
     resolved: ResolvedRole,
     resolved_command: str | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> list[str]:
-    """ResolvedRole 하나로 실행 커맨드를 조립하는 얇은 빌더(권한/샌드박스 계산은 resolve_role이 담당)."""
+    """ResolvedRole 하나로 실행 커맨드를 조립하는 얇은 빌더(권한/샌드박스 계산은 resolve_role이 담당).
+
+    allowed_tools가 None이면 config.mcp_allowed_tools를 그대로 쓴다(기존 호출부 동형).
+    리서치 워크플로처럼 스텝별로 다른 allowlist(WebSearch 등)가 필요한 호출부만 명시 전달한다.
+    """
     if resolved.agent == "claude":
         return claude_command(
             resolved_command or config.claude_command,
@@ -387,7 +392,7 @@ def command_for_agent(
             resolved.permission_mode,
             resolved.effort,
             skip_permissions=resolved.skip_permissions,
-            allowed_tools=config.mcp_allowed_tools,
+            allowed_tools=config.mcp_allowed_tools if allowed_tools is None else allowed_tools,
             mcp_config_path=config.mcp_config_path,
         )
     if resolved.agent == "codex":
