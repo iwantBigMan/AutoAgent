@@ -48,6 +48,7 @@ def test_plan_execute_manifest_state(tmp_path, monkeypatch):
     body = json.dumps({"response": {"header": {"resultCode": "00"}, "body": {"items": [{"x": 1}]}}})
     research_mod._run_openapi_collection(ctx, fetch=lambda u, t: oa.FetchResult(200, body))
     assert captured["name"] == "01_openapi_plan" and captured["role_id"] == "openapi_planner"
+    assert captured["charge_budget"] is False  # refine 콜과 동격: --max-agent-calls 별도 계정
     assert "KEY" not in captured["prompt_values"]["OPENAPI_CATALOG"]
     manifest = json.loads((tmp_path / "openapi_manifest.json").read_text(encoding="utf-8"))
     assert manifest["items"][0]["row_count"] == 1 and manifest["rejected"][0]["id"] == "c2"
@@ -56,6 +57,28 @@ def test_plan_execute_manifest_state(tmp_path, monkeypatch):
     # 재호출은 스킵(재개 안전).
     monkeypatch.setattr(research_mod, "_run_agent_step", lambda *a, **k: (_ for _ in ()).throw(AssertionError("재호출")))
     research_mod._run_openapi_collection(ctx)
+
+
+def test_run_agent_step_charge_budget_flag(tmp_path, monkeypatch):
+    """charge_budget=False는 AgentCallBudget.before_call을 건너뛴다(refine과 동격 별도 계정)."""
+    cfg = config_mod.load_config(tmp_path / "absent.json")
+    cfg.workspace = tmp_path
+    args = Namespace(dry_run=False, read_only=False, max_agent_calls=0)
+    budget = AgentCallBudget(0)
+    ctx = research_mod.ResearchContext(args=args, config=cfg, request="r", run_dir=tmp_path,
+                                        budget=budget, seed_contract="{}", state={})
+    monkeypatch.setattr(research_mod, "require_command", lambda *_a, **_k: "stub")
+    monkeypatch.setattr(research_mod, "run_process", lambda **_k: "output")
+    monkeypatch.setattr("autoagent.workflows.routed_impl.command_for_agent", lambda *a, **k: ["stub"])
+    common_kwargs = dict(
+        ctx=ctx, agent="claude", role_id="openapi_planner", name="x", prompt_name="openapi_plan.md",
+        prompt_values={"REQUEST": "r", "SEED_CONTRACT": "{}", "OPENAPI_CATALOG": "c", "MAX_CALLS": "1"},
+        next_step="step", dry_output="",
+    )
+    out = research_mod._run_agent_step(**common_kwargs, charge_budget=False)
+    assert out == "output" and budget.used_agent_calls == 0
+    research_mod._run_agent_step(**common_kwargs)  # 기본값(True)은 그대로 과금
+    assert budget.used_agent_calls == 1
 
 
 def test_stage_prompts_render_openapi_data():

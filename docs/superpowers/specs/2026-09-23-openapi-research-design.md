@@ -92,7 +92,7 @@ OPENAPI_PLAN_JSON
 
 ### C4. 워크플로 배선 (`autoagent/workflows/research.py`, `autoagent/config.py`, `autoagent/cli.py`)
 
-- config: `data_go_kr_service_key: str | None`(config > env), `openapi_max_calls: int = 12`, `openapi_registry_path`(기본 패키지 내 JSON). `autoagent.config.example.json`에 키 필드 예시(빈 문자열) 추가.
+- config: `data_go_kr_service_key: str | None`(config > env), `openapi_max_calls: int = 12`, `openapi_registry_path`(기본 패키지 내 JSON, 구현 보류 — 기본 레지스트리 경로만 사용, 필요 시 후속). `autoagent.config.example.json`에 키 필드 예시(빈 문자열) 추가.
 - `run_research_workflow`: seed pin 직후, `state.get("openapi")`가 없으면
   1. 키 없음 → `print("[openapi] 인증키 없음 - 공공데이터 수집 생략")`, `state["openapi"]={"skipped":"no_key"}`.
   2. 있음 → `_run_agent_step(name="01_openapi_plan", prompt_name="openapi_plan.md", ...)` → parse/validate → `execute_plan` → manifest → `state["openapi"]={"plan":..., "rejected":..., "manifest":"openapi_manifest.json"}` persist.

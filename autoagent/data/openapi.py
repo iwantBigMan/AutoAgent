@@ -153,17 +153,18 @@ def build_url(reg: Registry, call: PlanCall, key: str) -> str:
 
     key_param(오퍼레이션별, 기본 serviceKey)과 type_param(서비스별, 기본 type)은
     레지스트리 오버라이드를 따른다(예: user_info.getUnptRsttCorpInfo02는 ServiceKey,
-    mois_safety는 resultType). 인증키 파라미터는 계획 params로 덮어쓸 수 없도록
-    query.update(call.params) 이후에 마지막으로 설정한다.
+    mois_safety는 resultType). 인증키 파라미터와 응답형식 파라미터 둘 다 계획 params로
+    덮어쓸 수 없도록 query.update(call.params) 이후에 마지막으로 설정한다(플래너가
+    type/resultType을 params에 넣어 응답형식을 바꾸는 것을 차단).
     """
     svc = reg.services[call.service]
     op_meta = (svc.get("operations") or {}).get(call.operation, {})
     key_param = op_meta.get("key_param", "serviceKey")
     type_param = svc.get("type_param", "type")
     query: dict[str, str] = {}
+    query.update(call.params)
     if svc["format"] == "json":
         query[type_param] = "json"
-    query.update(call.params)
     query[key_param] = key
     return f"{svc['base_url'].rstrip('/')}/{call.operation}?{urlencode(query)}"
 
@@ -218,27 +219,51 @@ class ManifestItem:
 
 
 def _summarize_body(body: str) -> tuple[str | None, str | None, int | None, bool]:
-    """data.go.kr 표준 JSON(response.header/body)이면 resultCode·resultMsg·행수를 best-effort로 뽑는다."""
+    """data.go.kr 표준 JSON(response.header/body)이면 resultCode·resultMsg·행수를 best-effort로 뽑는다.
+
+    라이브 스모크에서 확인된 비표준 실측 응답 3형태도 처리한다(모두 best-effort):
+    (1) 최상위 키가 `response`가 아닌 `*.ResponseError` 래퍼(나라장터 필수값 누락 에러) -
+        header를 가진 첫 top-level dict 값을 response로 취급한다.
+    (2) body에 `items`가 아닌 단수 `item`이 직결된 경우(행안부 mois_safety 성공 응답).
+    (3) header가 없고 대신 `response.result`에 코드가 있는 경우(KISA whois JSON) -
+        result.result_code/result_msg를 쓰고, rows는 response.whois 존재 여부로 판단한다.
+    """
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
         return None, None, None, False
     if not isinstance(data, dict):
         return None, None, None, True
-    response = data.get("response") if isinstance(data.get("response"), dict) else {}
+    response = data.get("response") if isinstance(data.get("response"), dict) else None
+    if response is None:
+        for value in data.values():
+            if isinstance(value, dict) and isinstance(value.get("header"), dict):
+                response = value
+                break
+    response = response or {}
     header = response.get("header") if isinstance(response.get("header"), dict) else {}
     payload = response.get("body") if isinstance(response.get("body"), dict) else {}
     items = payload.get("items")
     if isinstance(items, dict):
         items = items.get("item")
+    if items is None:
+        items = payload.get("item")
     if isinstance(items, list):
         rows: int | None = len(items)
     elif isinstance(items, dict):
         rows = 1
     else:
         rows = 0 if payload else None
-    code = header.get("resultCode")
-    return (str(code) if code is not None else None), header.get("resultMsg"), rows, True
+    if header:
+        code = header.get("resultCode")
+        msg = header.get("resultMsg")
+    else:
+        result = response.get("result") if isinstance(response.get("result"), dict) else {}
+        code = result.get("result_code")
+        msg = result.get("result_msg")
+        whois = response.get("whois")
+        rows = 1 if isinstance(whois, dict) and whois else None
+    return (str(code) if code is not None else None), msg, rows, True
 
 
 def execute_plan(

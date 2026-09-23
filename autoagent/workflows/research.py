@@ -142,10 +142,13 @@ def _run_agent_step(
     prompt_values: dict[str, str],
     next_step: str,
     dry_output: str,
+    charge_budget: bool = True,
 ) -> str:
     """리서치 스텝 1회 실행(dry-run이면 프롬프트/커맨드만 렌더). routed의 run_role_step 축약판.
 
     command_for_agent는 순환 import 방지를 위해 지연 import한다(레포 관례).
+    charge_budget=False면 AgentCallBudget 소모 없이 호출한다(01_openapi_plan처럼
+    refine 콜과 동격으로 --max-agent-calls와 별도 계정할 스텝용).
     """
     from autoagent.workflows.routed_impl import command_for_agent
 
@@ -173,7 +176,8 @@ def _run_agent_step(
         return dry_output
 
     command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
-    ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
+    if charge_budget:
+        ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
         command=command_for_agent(config, resolved, resolved_command=command_name, allowed_tools=allowed_tools),
@@ -215,6 +219,7 @@ def _run_openapi_collection(ctx: "ResearchContext", *, fetch=None) -> None:
                        "OPENAPI_CATALOG": render_catalog_md(registry), "MAX_CALLS": str(ctx.config.openapi_max_calls)},
         next_step="openapi_plan",
         dry_output=f'{PLAN_MARKER}\n```json\n{{"calls": []}}\n```\n',
+        charge_budget=False,  # refine 콜과 동격: --max-agent-calls와 별도 계정(CLAUDE.md).
     )
     plan = parse_plan(plan_out)
     if plan.error:

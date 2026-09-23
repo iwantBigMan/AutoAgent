@@ -209,3 +209,51 @@ def test_redact_url_redacts_capitalized_servicekey(tmp_path):
     red = oa.redact_url(url)
     assert "SECRET" not in red
     assert "ServiceKey=%2A%2A%2A" in red or "ServiceKey=***" in red
+
+
+def test_build_url_type_param_cannot_be_overridden_by_planner_params(tmp_path):
+    # 계획 params에 응답형식 파라미터(type)를 넣어도 레지스트리가 정한 json이 최종값이어야 한다.
+    reg = _reg(tmp_path)
+    call = oa.PlanCall(id="c1", service="bid_notice", operation="getBidList", params={"type": "xml"})
+    url = oa.build_url(reg, call, KEY)
+    assert "type=json" in url
+    assert "type=xml" not in url
+
+
+def test_build_url_service_level_type_param_cannot_be_overridden(tmp_path):
+    # type_param 오버라이드(resultType)가 있는 서비스도 동일하게 보호되어야 한다.
+    reg = _reg_with_overrides(tmp_path)
+    call = oa.PlanCall(id="c1", service="mois_like", operation="getSafety", params={"resultType": "xml"})
+    url = oa.build_url(reg, call, KEY)
+    assert "resultType=json" in url
+    assert "resultType=xml" not in url
+
+
+def test_summarize_body_standard_shape_still_works():
+    code, msg, rows, is_json = oa._summarize_body(_ok_body(2))
+    assert code == "00" and msg == "NORMAL SERVICE" and rows == 2 and is_json
+
+
+def test_summarize_body_response_error_wrapper():
+    # 나라장터 필수값 누락 에러: 최상위 키가 response가 아니다.
+    body = json.dumps({"nkoneps.com.response.ResponseError": {
+        "header": {"resultCode": "08", "resultMsg": "필수값 입력 에러"}}})
+    code, msg, rows, is_json = oa._summarize_body(body)
+    assert code == "08" and msg == "필수값 입력 에러" and rows is None and is_json
+
+
+def test_summarize_body_singular_item_field():
+    # 행안부(mois_safety) 성공 응답: items가 아니라 단수 item.
+    body = json.dumps({"response": {"header": {"resultCode": "00", "resultMsg": "NORMAL_CODE"},
+                                    "body": {"numOfRows": 1, "pageNo": 1, "totalCount": 23089,
+                                             "item": [{"a": 1}]}}})
+    code, msg, rows, is_json = oa._summarize_body(body)
+    assert code == "00" and msg == "NORMAL_CODE" and rows == 1 and is_json
+
+
+def test_summarize_body_kisa_whois_result_wrapper():
+    # KISA whois(answer=json): header 없이 response.result에 코드가 있다.
+    body = json.dumps({"response": {"result": {"result_code": "10000", "result_msg": "정상 응답 입니다."},
+                                    "whois": {"krdomain": {"name": "example.kr"}}}})
+    code, msg, rows, is_json = oa._summarize_body(body)
+    assert code == "10000" and msg == "정상 응답 입니다." and rows == 1 and is_json

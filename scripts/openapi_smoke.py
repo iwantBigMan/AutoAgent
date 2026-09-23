@@ -8,6 +8,8 @@ contract_process, user_info, procure_request, price_info, open_standard,
 private_bid, kisa_domain, mois_safety (autoagent/data/openapi_registry.json).
 키는 autoagent.config.json(data_go_kr_service_key) > env DATA_GO_KR_SERVICE_KEY. pytest 대상 아님.
 출력은 ASCII+한글만(키·전체 URL은 출력하지 않는다).
+나라장터 계열(user_info/bid_notice/award/contract 등)은 inqryDiv=1 inqryBgnDt=YYYYMMDDHHMM
+inqryEndDt=YYYYMMDDHHMM이 필수값이며 누락 시 resultCode 08(필수값 입력 에러)로 응답한다.
 """
 from __future__ import annotations
 
