@@ -300,7 +300,9 @@ def execute_plan(
         errors = []
         if result.status != 200:
             errors.append(f"HTTP {result.status}")
-        if code not in (None, "00"):
+        # 성공 코드는 서비스별로 다를 수 있다(표준 "00", KISA whois는 "10000") - 레지스트리 ok_codes로 선언.
+        ok_codes = reg.services[call.service].get("ok_codes") or ["00"]
+        if code is not None and code not in ok_codes:
             errors.append(f"resultCode {code} {msg or ''}".strip())
         item.error = "; ".join(errors) or None
         items.append(item)

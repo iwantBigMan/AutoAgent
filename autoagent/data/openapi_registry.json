@@ -450,6 +450,7 @@
       "data_go_kr_id": "15094277",
       "base_url": "https://apis.data.go.kr/B551505/whois",
       "format": "xml",
+      "ok_codes": ["10000"],
       "note": "data.go.kr/data/15094277/openapi.do는 Swagger가 아닌 정적 HTML 요청/응답 표(4개 세부기능 select 드롭다운)라 WebFetch로 직접 재확인(2026-09-23) — base_url·오퍼레이션명 4종 raw 카탈로그와 일치. 기본 응답은 XML이며 JSON을 받으려면 오퍼레이션마다 answer=json을 추가로 지정해야 한다(하네스 공통 type 파라미터는 쓰지 않음).",
       "operations": {
         "domain_name": {

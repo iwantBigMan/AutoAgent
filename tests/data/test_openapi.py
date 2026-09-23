@@ -257,3 +257,20 @@ def test_summarize_body_kisa_whois_result_wrapper():
                                     "whois": {"krdomain": {"name": "example.kr"}}}})
     code, msg, rows, is_json = oa._summarize_body(body)
     assert code == "10000" and msg == "정상 응답 입니다." and rows == 1 and is_json
+
+
+def test_execute_plan_honors_service_ok_codes(tmp_path):
+    """서비스별 ok_codes(예: KISA whois "10000")를 성공으로 보고, 미선언 서비스는 "00"만 성공."""
+    data = json.loads(json.dumps(FIXTURE))
+    data["services"]["whois_like"] = {
+        "name": "테스트 whois", "data_go_kr_id": "4", "format": "xml", "ok_codes": ["10000"],
+        "base_url": "https://apis.data.go.kr/B551505/whois",
+        "operations": {"domain_name": {"purpose": "도메인 조회", "params": {}}},
+    }
+    reg = _reg(tmp_path, data)
+    kisa_body = json.dumps({"response": {"result": {"result_code": "10000", "result_msg": "ok"}, "whois": {"krdomain": {"name": "x"}}}})
+    items = oa.execute_plan([oa.PlanCall("k1", "whois_like", "domain_name", {}),
+                             oa.PlanCall("b1", "bid_notice", "getBidList", {})],
+                            reg, "KEY", tmp_path, fetch=lambda u, t: oa.FetchResult(200, kisa_body), pause_seconds=0)
+    assert items[0].result_code == "10000" and items[0].error is None
+    assert items[1].error is not None and "10000" in items[1].error
