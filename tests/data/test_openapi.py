@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, quote_plus
 
 import pytest
 
@@ -139,3 +139,11 @@ def test_manifest_and_summary(tmp_path):
 
 def test_summary_without_manifest(tmp_path):
     assert oa.render_openapi_summary(tmp_path) == "(공공데이터 스냅샷 없음)"
+
+
+def test_scrub_removes_plus_encoded_key_with_space():
+    key = "AB CD+/="
+    text = f"raw:{key} q:{quote(key, safe='')} qp:{quote_plus(key, safe='')}"
+    out = oa._scrub(text, key)
+    assert key not in out and quote(key, safe="") not in out and quote_plus(key, safe="") not in out
+    assert out.count("***") == 3

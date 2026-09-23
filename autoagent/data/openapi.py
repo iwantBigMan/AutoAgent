@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.error import HTTPError
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, quote_plus, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from autoagent.artifacts import write_json, write_text
@@ -166,10 +166,10 @@ def redact_url(url: str) -> str:
 
 
 def _scrub(text: str, key: str) -> str:
-    """본문·메시지에서 키(원문·URL인코딩형) 흔적을 제거한다."""
+    """본문·메시지에서 키(원문·quote·quote_plus) 흔적을 제거한다."""
     if not key:
         return text
-    return text.replace(key, "***").replace(quote(key, safe=""), "***")
+    return text.replace(key, "***").replace(quote(key, safe=""), "***").replace(quote_plus(key, safe=""), "***")
 
 
 @dataclass
