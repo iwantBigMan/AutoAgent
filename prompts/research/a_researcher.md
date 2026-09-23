@@ -10,6 +10,9 @@
 ## 원 요청
 {{REQUEST}}
 
+## 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
+{{OPENAPI_DATA}}
+
 ## 루프 컨텍스트
 - outer_pass: {{OUTER_PASS}}
 - inner_round: {{INNER_ROUND}}

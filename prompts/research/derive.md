@@ -9,6 +9,9 @@
 ## 스테이지 a 산출물(검증 통과분)
 {{STAGE_A_OUTPUT}}
 
+## 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
+{{OPENAPI_DATA}}
+
 ## 직전 검증 피드백(있으면 반영)
 {{PRIOR_FEEDBACK}}
 

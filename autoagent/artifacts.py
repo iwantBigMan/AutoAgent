@@ -54,6 +54,7 @@ PROMPT_ALIASES = {
     "c_codex_research.md": "research/c_codex_research.md",
     "d_fact_report.md": "research/d_fact_report.md",
     "d_grounding_verify.md": "research/d_grounding_verify.md",
+    "openapi_plan.md": "research/openapi_plan.md",
     "claude_refine.md": "refine/claude_refine.md",
 }
 
