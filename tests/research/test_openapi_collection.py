@@ -85,7 +85,8 @@ def test_stage_prompts_render_openapi_data():
     values = {k: "v" for k in (
         "REQUEST", "WORKSPACE", "SEED_CONTRACT", "SEED_PIN", "STAGE_ID", "OUTER_PASS", "INNER_ROUND", "PRIOR_FEEDBACK",
         "INNER_FEEDBACK", "DEEPEN_DELTA", "PRIOR_VERDICT_FEEDBACK", "PRIOR_STAGE_SUMMARY", "STAGE_A_OUTPUT", "CSV_PATHS",
-        "MIN_FINDINGS", "SEED_COMPANY", "SEED_MARKET", "SEED_CURRENCY", "SEED_PERIOD", "SEED_UNIT", "SEED_AS_OF")}
+        "MIN_FINDINGS", "SEED_COMPANY", "SEED_MARKET", "SEED_CURRENCY", "SEED_PERIOD", "SEED_UNIT", "SEED_AS_OF",
+        "STAGE_B_OUTPUT", "STAGE_C_OUTPUT", "STAGE_D_OUTPUT", "STAGE_STATUS_JSON")}
     values["OPENAPI_DATA"] = "TABLE_MARK"
     for name in ("a_researcher.md", "b_market_researcher.md", "c_codex_research.md", "d_fact_report.md", "derive.md"):
         out = render_template(name, values)

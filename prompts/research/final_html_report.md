@@ -13,5 +13,14 @@ standalone HTML로 변환해 바탕화면에 저장한다. 커버리지 매트�
 ## 회사 리서치(a)
 {{STAGE_A_OUTPUT}}
 
+## 시장 분석(b)
+{{STAGE_B_OUTPUT}}
+
+## CSV 정제(c)
+{{STAGE_C_OUTPUT}}
+
+## 팩트 리포트(d)
+{{STAGE_D_OUTPUT}}
+
 ## 도출(derive)
 {{DERIVE_OUTPUT}}

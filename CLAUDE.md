@@ -40,14 +40,20 @@ cross-model implement/review with human approval gates. Full reference: `README.
   parallel execution — each node isolated in its own worktree, reviewed by the opposite
   model, then merged into an integration branch `aa-integration/<stamp>`; concurrency is
   `config.max_parallel_lanes` (default 2), sequential if `1`.
+- Non-mutating routed roles use read-only permissions. Task scope violations block
+  commits/integration; this is a Git diff guard, not an OS path sandbox. Research CSV
+  cleaning uses a run-local data directory instead of the target project.
+- Resume restores the saved project policy and counted call usage. Resume dry-runs
+  write to isolated `previews/` directories, never original task/approval state.
 - Run artifacts land in `runs/YYYYMMDD_HHMMSS/` (gitignored except `.gitkeep`).
 
 ## Testing / verification
-- **routed/decompose = no unit tests** → verify with dry-run:
+- **routed/decompose safety and resume tests** include isolated temporary Git integration.
+  Also verify prompt rendering with dry-run:
   `python .\run.py --dry-run --workflow routed --task-type backend --request "..."`
   (renders every prompt + `*_command.json`, no CLI invoked; dry-run never counts against `--max-agent-calls`).
 - **`research` subsystem HAS a deterministic pytest suite** (`autoagent/research/**`·`autoagent/data/**`,
-  `tests/data/**` 포함, pytest.ini): `python -m pytest tests/ -q` (~255 tests). 모델 호출부는 여전히 dry-run으로:
+  `tests/data/**` 포함, pytest.ini): `python -m pytest tests/ -q`. 모델 호출부는 여전히 dry-run으로:
   `python run.py --dry-run --workflow research --request "..."` (a→b→c→d→derive 전 스테이지 순회 후 exit 0).
 - 리서치 워크플로는 **pytest + dry-run까지만 검증** — 실모델 라이브 런 미실증(사용자 인계). "구현됨"을 "실전 검증됨"으로 단정 말 것.
 

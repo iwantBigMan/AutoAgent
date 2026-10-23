@@ -67,6 +67,16 @@ EN_IMPL_INTENT_PATTERN = re.compile(
 )
 
 
+def read_only_intent(request: str) -> bool:
+    """명시적인 검토 전용/코드 수정 금지 요청을 도메인 점수보다 우선한다."""
+    return bool(re.search(
+        r"\b(?:review|audit|inspect|analysis)\s+only\b|\bread[- ]only\b|"
+        r"\b(?:do not|don't|never)\s+(?:modify|edit|change|implement)\b|"
+        r"(?:검토|리뷰|분석|확인)\s*만|(?:수정|변경|구현)\s*(?:하지\s*마|금지)",
+        request, re.IGNORECASE,
+    ))
+
+
 def db_term_count(text: str) -> int:
     """DB_TERMS 중 요청에 등장한 개수. 'db' 코드 심볼(db_score) 오발만 좁게 배제한다.
 
@@ -100,6 +110,11 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
     lowered = request.lower()
     db_score = db_term_count(lowered)   # 기존 sum(... in lowered) substring 오발을 토큰 매칭으로 대체
     high_risk_score = sum(1 for term in HIGH_RISK_TERMS if term in lowered)
+
+    if read_only_intent(request) and task_type in {"auto", "backend", "frontend"}:
+        route = route_task("review", request, requested_implementer)
+        route["reason"] = "Explicit read-only intent; implementation is disabled."
+        return route
 
     if task_type != "auto":
         chosen = task_type

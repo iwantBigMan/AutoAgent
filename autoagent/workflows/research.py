@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 from argparse import Namespace
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,7 +44,7 @@ from autoagent.research.snapshots import save_snapshot, write_sources_manifest
 from autoagent.research.state import (
     is_stage_done, load_or_init_state, persist_state, pin_seed, resume_point, set_stage_status, STAGE_ORDER,
 )
-from autoagent.research.types import StageId, StageResult, Verdict
+from autoagent.research.types import Finding, StageId, StageResult, Verdict
 from autoagent.roles import load_roles, resolve_role
 from autoagent.routing import choose_researcher
 from autoagent.runner import (
@@ -157,8 +157,17 @@ def _run_agent_step(
     run_dir = ctx.run_dir
     roles = load_roles(DEFAULT_CONFIG.parent)
     route = {"task_type": "research", "risk_level": "medium", "subtype": "research"}
+    entry = roles[role_id]
+    output_dir = None
+    if role_id == "researcher" and prompt_name == "c_codex_research.md" and not args.read_only:
+        # CSV 정제만 실행별 데이터 폴더에서 허용한다. 프로젝트 쓰기 권한은 주지 않는다.
+        output_dir = (run_dir / "data" / name).resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        config = replace(config, workspace=output_dir, codex_sandbox="workspace-write",
+                         claude_impl_permission="acceptEdits", mcp_allowed_tools=[], mcp_config_path=None)
+        entry = {**entry, "mutating": True}
     resolved = resolve_role(
-        roles[role_id], config=config, route=route, request=ctx.request, agent=agent, read_only=args.read_only
+        entry, config=config, route=route, request=ctx.request, agent=agent, read_only=args.read_only
     )
     # 리서치는 코드 계획이 아니라 웹 조사다. non-mutating 공통 정책이 주는 plan 모드는
     # 헤드리스에서 "코드 변경 계획" 프레임으로 리서치 요청 거부를 유발하고(20260921_111823
@@ -170,12 +179,16 @@ def _run_agent_step(
         resolved.permission_mode = None
         allowed_tools = [*config.mcp_allowed_tools, "WebSearch", "WebFetch"]
     prompt = render_template(prompt_name, prompt_values)
+    if output_dir is not None:
+        prompt = (f"Allowed output directory: {output_dir}\n"
+                  "Only write cleaned CSV files inside this directory. All source files and the project "
+                  "are read-only. Return absolute source_dump_path and output path values.\n\n" + prompt)
     if args.dry_run:
         write_text(run_dir / f"{name}_prompt.md", prompt)
         write_command_artifact(run_dir, name, command_for_agent(config, resolved, allowed_tools=allowed_tools))
         return dry_output
 
-    command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
+    command_name = require_command(config.claude_command if resolved.agent == "claude" else config.codex_command)
     if charge_budget:
         ctx.budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
@@ -384,6 +397,10 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
             "PRIOR_VERDICT_FEEDBACK": prior_feedback,       # d 프롬프트 명칭(CF-1)
             "PRIOR_STAGE_SUMMARY": _prior_stage_summary(ctx),  # d 프롬프트 명칭(CF-1)
             "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", ""),
+            "STAGE_B_OUTPUT": ctx.stage_outputs.get("b", ""),
+            "STAGE_C_OUTPUT": ctx.stage_outputs.get("c", ""),
+            "STAGE_D_OUTPUT": ctx.stage_outputs.get("d", ""),
+            "STAGE_STATUS_JSON": json.dumps(ctx.state.get("stage_status", {}), ensure_ascii=False),
             # c 리서처(codex)용 CSV 경로. config에 있으면 그 값을, 없으면 워크스페이스 안내.
             "CSV_PATHS": getattr(ctx.config, "research_csv_paths", "") or "(워크스페이스의 입력 CSV)",
             # crossmodel 검증기의 최소 findings 쿼터(config crossmodel_min_findings, 기본 3).
@@ -435,6 +452,10 @@ def run_stage_loop(stage: StageId, outer_pass: int, ctx: ResearchContext) -> Sta
                 STAGE_ADAPTER[stage], {"stage_id": stage, "verifier_raw_text": verifier_out},
                 ctx.run_dir, verifier_agent=verifier, config=ctx.config,
             )
+        if ctx.args.dry_run and stage in {"c", "d"}:
+            # 미리보기의 더미 출력만 모의 통과한다. 실제 검증기는 빈 입력을 거부한다.
+            verdict = Verdict(status="pass", adapter=STAGE_ADAPTER[stage], stage_id=stage,
+                              findings=[], raw={"simulated": True})
         last_verdict = verdict
         ctx.state.setdefault("stage_status", {})[stage] = verdict.status
         _persist_state(ctx)
@@ -508,8 +529,22 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
     진입 게이트 → 커버리지 매트릭스+배너를 상단에 박은 standalone HTML을 바탕화면에 저장한다.
     request=None은 --resume 진입(저장된 seed/상태에서 복원). dry-run이면 CLI 미호출.
     """
-    budget = AgentCallBudget(args.max_agent_calls)
+    budget = AgentCallBudget.for_run(args.max_agent_calls, run_dir, dry_run=args.dry_run)
     state = load_or_init_state(run_dir)
+    request = request or state.get("request", "")
+    state["request"] = request
+    state.setdefault("status_outer", state.get("outer_pass", 1))
+    gate_path = run_dir / "gate_status.json"
+    if getattr(args, "resume", None) and gate_path.exists() and not args.dry_run:
+        gate = json.loads(read_text(gate_path))
+        if gate.get("status") == "waiting_for_human_approval" and gate.get("state", {}).get("outer_pass") == state.get("outer_pass"):
+            if gate.get("gate_kind") == "high_cost_deepen":
+                approvals = state.setdefault("approved_deepen_passes", [])
+                if state["outer_pass"] not in approvals:
+                    approvals.append(state["outer_pass"])
+            gate.update(status="approved", approved=True)
+            write_json(gate_path, gate)
+            persist_state(run_dir, state)
     max_outer = getattr(config, "research_max_outer", DEFAULT_MAX_OUTER)
     min_new_claims = getattr(config, "research_min_new_claims", DEFAULT_MIN_NEW_CLAIMS)
     auto_nonbranch = getattr(args, "auto_approve_nonbranch", False)
@@ -555,27 +590,39 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
     try:
         for outer_pass in range(resume_outer, max_outer + 1):
             state["outer_pass"] = outer_pass
+            if state["status_outer"] != outer_pass:
+                state.update(status_outer=outer_pass, stage_status={}, stage_results={})
+                state["stage"] = "a"
+                state["inner_round"] = 0
             persist_state(run_dir, state)
 
             # 고비용 심화 진입 게이트(pass 2+, forced).
             deepen_trigger = evaluate_gate(event="deepen_entry", outer_pass=outer_pass,
                                            stage_results=[], contradiction=False, config=config)
-            if should_pause(deepen_trigger, auto_approve_nonbranch=auto_nonbranch):
+            if not args.dry_run and outer_pass not in state.get("approved_deepen_passes", []) and should_pause(deepen_trigger, auto_approve_nonbranch=auto_nonbranch):
                 return pause_at_gate(run_dir, deepen_trigger, state)
 
             stage_results = []  # 이 pass의 스테이지 결과(위에서 선초기화한 변수를 pass마다 재설정)
             for stage in STAGE_ORDER:
                 state["stage"] = stage
                 if is_stage_done(state, stage):
+                    cached = state.get("stage_results", {}).get(stage)
+                    if cached:
+                        data = dict(cached)
+                        verdict_data = data.get("verdict")
+                        if verdict_data:
+                            data["verdict"] = Verdict(**{**verdict_data, "findings": [Finding(**f) for f in verdict_data["findings"]]})
+                        stage_results.append(StageResult(**data))
                     continue  # 재개 시 resolved 스테이지 건너뜀
                 result = run_stage_loop(stage, outer_pass, ctx)
                 stage_results.append(result)
+                state.setdefault("stage_results", {})[stage] = asdict(result)
                 set_stage_status(run_dir, state, stage, result.status)
 
                 # 스테이지 경계 게이트(blocked·exhausted 다수).
                 boundary = evaluate_gate(event="stage_boundary", outer_pass=outer_pass,
                                          stage_results=stage_results, contradiction=False, config=config)
-                if should_pause(boundary, auto_approve_nonbranch=auto_nonbranch):
+                if not args.dry_run and should_pause(boundary, auto_approve_nonbranch=auto_nonbranch):
                     return pause_at_gate(run_dir, boundary, state)
 
             # pass간 검증 claim 수집·delta·수렴/모순 판정.
@@ -618,8 +665,13 @@ def run_research_workflow(args: Namespace, config: Config, request: str | None, 
     body_md = render_template("final_html_report.md", {
         "REQUEST": ctx.request, "SEED_CONTRACT": ctx.seed_contract,
         "STAGE_A_OUTPUT": ctx.stage_outputs.get("a", "(없음)"),
+        "STAGE_B_OUTPUT": ctx.stage_outputs.get("b", "(없음)"),
+        "STAGE_C_OUTPUT": ctx.stage_outputs.get("c", "(없음)"),
+        "STAGE_D_OUTPUT": ctx.stage_outputs.get("d", "(없음)"),
         "DERIVE_OUTPUT": ctx.stage_outputs.get("derive", "(없음)"),
     })
+    if args.dry_run:
+        body_md = "# DRY RUN: no model calls or evidence verification performed\n\n" + body_md
     # FIX 3([T28a]): banner/matrix는 markdown_to_html._inline이 html.escape()하는 body_md
     # 경로가 아니라 prepend_html로 넘겨 unescaped 그대로 상단에 박는다(§2.3 요구 충족).
     html = render_report_html(title="리서치 리포트", body_md=body_md, prepend_html=banner_html + matrix_html)

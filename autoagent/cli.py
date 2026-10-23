@@ -13,6 +13,7 @@ from pathlib import Path
 
 from autoagent.artifacts import DEFAULT_CONFIG, ensure_project_config, make_run_dir, read_text, write_metadata, write_text
 from autoagent.config import load_config
+from autoagent.run_state import restore_execution_context, save_execution_context, isolate_preview
 from autoagent.workflows.decompose import run_decompose_workflow
 from autoagent.workflows.research import run_research_workflow
 from autoagent.workflows.routed import resume_routed_workflow, run_routed_workflow
@@ -86,8 +87,17 @@ def resume_mode(run_dir: Path) -> str:
     return checkpoint.get("mode") or "routed_impl"
 
 
+class ArgumentParser(argparse.ArgumentParser):
+    """기본값과 명시적 재개 override를 구별한다."""
+    def parse_args(self, args=None, namespace=None):
+        tokens = list(sys.argv[1:] if args is None else args)
+        parsed = super().parse_args(tokens, namespace)
+        parsed._explicit_options = {t.split("=", 1)[0][2:].replace("-", "_") for t in tokens if t.startswith("--")}
+        return parsed
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Claude Code + Codex CLI local harness MVP")
+    parser = ArgumentParser(description="Claude Code + Codex CLI local harness MVP")
     parser.add_argument("--request", help="Task request text")
     parser.add_argument("--request-file", help="Path to a markdown request file")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="Path to config JSON")
@@ -156,6 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def dispatch_workflow(args: argparse.Namespace, config, request: str, run_dir: Path) -> int:
     """요청 텍스트로 워크플로를 시작한다(신규 런과 refine 게이트 재개가 공용)."""
+    save_execution_context(args, config, run_dir, request)
     if args.workflow == "routed":
         return run_routed_workflow(args, config, request, run_dir)
     if args.workflow == "decompose":
@@ -167,12 +178,24 @@ def dispatch_workflow(args: argparse.Namespace, config, request: str, run_dir: P
 
 def main() -> int:
     args = build_parser().parse_args()
+    saved = {}
+    if args.resume:
+        if args.request or args.request_file:
+            raise SystemExit("--resume cannot be combined with --request/--request-file.")
+        original_run = Path(args.resume).resolve()
+        saved = restore_execution_context(args, original_run)
+        args.resume = str(isolate_preview(original_run) if args.dry_run else original_run)
+    args.config = str(Path(args.config).resolve())
     write_home_pointer()  # 자기등록: /aa·/aar가 이 클론을 찾을 수 있게 한다(dry-run 포함)
     if args.project:
         # --project가 요구하는 config를 미리 보장한다. workspace는 --workspace(abs) 우선, 없으면 cwd.
         ws = Path(args.workspace).resolve() if args.workspace else Path.cwd()
         ensure_project_config(Path(args.config).parent, args.project, ws)
     config = load_config(Path(args.config), project=args.project)
+    if saved and not ({"config", "project"} & args._explicit_options):
+        for key, value in saved.get("policy", {}).items():
+            if hasattr(config, key) and key not in {"workspace", "mcp_config_path"}:
+                setattr(config, key, value)
     from autoagent.roles import load_roles, validate_roles
     validate_roles(load_roles(DEFAULT_CONFIG.parent), DEFAULT_CONFIG.parent, config.tiers)
     # MCP(증분 2): Codex의 [mcp_servers.*]와 서버 대칭을 시작 시 검사한다(불일치는 경고, 차단 아님).
@@ -183,7 +206,9 @@ def main() -> int:
     if config.solo_provider:
         print(solo_banner(config.solo_provider))
     if args.workspace:
-        config.workspace = Path(args.workspace)
+        config.workspace = Path(args.workspace).resolve()
+    elif config.workspace is not None:
+        config.workspace = config.workspace.resolve()
 
     # --resume는 게이트에서 정지했던 run을 이어받아 구현 단계로 재개한다.
     # 새 요청을 받는 게 아니므로 --request/--request-file과 함께 쓸 수 없다.
@@ -197,10 +222,11 @@ def main() -> int:
         if refine_gate_pending(run_dir):
             request, refine_status = resume_from_refine_gate(args, run_dir)
             # 원 런의 project/config로 재로딩(티어·solo 등 반영) 후 workspace 복원.
-            config = load_config(Path(args.config), project=args.project)
+            if not saved.get("policy"):
+                config = load_config(Path(args.config), project=args.project)
             config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
             if args.workspace:
-                config.workspace = Path(args.workspace)
+                config.workspace = Path(args.workspace).resolve()
             else:
                 config.workspace = Path(refine_status["workspace"])
             if not config.workspace.exists():
@@ -211,7 +237,9 @@ def main() -> int:
         if (run_dir / "research_state.json").exists():
             # research 재개는 config workspace를 그대로 쓴다(상태파일에 복원 없음) - None 방어.
             require_workspace(config)
-            return run_research_workflow(args, config, None, run_dir)
+            request_path = run_dir / "00_request.md"
+            request = saved.get("request") or (read_text(request_path) if request_path.exists() else None)
+            return run_research_workflow(args, config, request, run_dir)
         mode = resume_mode(run_dir)
         if mode == "task_graph":
             # task_graph 재개는 run_task_graph_execution 내부에서 checkpoint의
@@ -230,6 +258,7 @@ def main() -> int:
         raise SystemExit("Request is empty.")
 
     run_dir = make_run_dir(project=args.project)
+    save_execution_context(args, config, run_dir, request)
     config.mcp_config_path = write_claude_mcp_config(config, run_dir, dry_run=args.dry_run)
     write_metadata(
         run_dir,

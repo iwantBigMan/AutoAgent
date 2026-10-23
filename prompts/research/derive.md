@@ -9,6 +9,21 @@
 ## 스테이지 a 산출물(검증 통과분)
 {{STAGE_A_OUTPUT}}
 
+## 스테이지 b: 시장 분석
+{{STAGE_B_OUTPUT}}
+
+## 스테이지 c: CSV 정제
+{{STAGE_C_OUTPUT}}
+
+## 스테이지 d: 팩트 검증
+{{STAGE_D_OUTPUT}}
+
+## 각 입력의 검증 상태
+{{STAGE_STATUS_JSON}}
+
+resolved 상태의 입력만 검증된 근거로 사용하라. 그 외 입력은 미검증으로 명시하고,
+이전 pass의 결과가 남아 있더라도 현재 pass에서 검증됐다고 표현하지 마라.
+
 ## 하네스가 수집한 공공데이터(data.go.kr) 스냅샷
 {{OPENAPI_DATA}}
 

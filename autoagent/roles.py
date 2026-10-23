@@ -99,7 +99,7 @@ def resolve_role(
     if getattr(config, "solo_provider", None):
         agent = config.solo_provider
 
-    mutating = bool(entry["mutating"])
+    mutating = bool(entry["mutating"]) and not read_only
 
     # high-risk 조건 판정(역할별 비대칭 그대로).
     cond = entry["high_risk_condition"]
@@ -129,8 +129,7 @@ def resolve_role(
         else:
             permission_mode = "acceptEdits"  # 기본: 편집만 자동, bash/네트워크 차단
     elif agent == "codex":
-        sb = entry.get("sandbox", "configured")
-        sandbox = codex_sandbox_for(read_only, config.codex_sandbox) if sb == "from_read_only" else config.codex_sandbox
+        sandbox = codex_sandbox_for(not mutating, config.codex_sandbox)
 
     return ResolvedRole(agent=agent, model=model, effort=effort, mutating=mutating,
                         permission_mode=permission_mode, skip_permissions=skip_permissions, sandbox=sandbox)

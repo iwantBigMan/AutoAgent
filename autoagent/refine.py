@@ -171,7 +171,8 @@ def resume_from_refine_gate(args: Namespace, run_dir: Path) -> tuple[str, dict[s
         raise SystemExit(f"{REFINED_REQUEST} is empty in {run_dir}; edit it and resume again.")
     # 원 런의 인자를 복원한다(재개 명령엔 플래그가 없으므로 CLI 기본값을 덮는다).
     for key, value in (status.get("args") or {}).items():
-        setattr(args, key, value)
+        if key not in getattr(args, "_explicit_options", ()):
+            setattr(args, key, value)
     status["status"] = "approved"
     write_json(run_dir / REFINE_STATUS, status)
     # 다운스트림 전 단계가 참조하는 정본 요청 파일을 이 시점에 기록한다.

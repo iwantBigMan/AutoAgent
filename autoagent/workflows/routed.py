@@ -14,7 +14,7 @@ from autoagent.artifacts import read_text, write_json, write_text
 from autoagent.config import Config
 from autoagent.routing import route_task
 from autoagent.runner import AgentCallBudget, AgentCallBudgetStopped
-from autoagent.safety import git_baseline_status
+from autoagent.safety import git_baseline_status, result_status
 from autoagent.workflows.routed_common import (
     approval_required,
     block_for_human_approval,
@@ -30,7 +30,7 @@ def run_routed_workflow(args: Namespace, config: Config, request: str, run_dir: 
     """라우팅 -> preamble -> (docs/read-only면 문서 라우트) -> 승인 게이트 -> 구현 라우트."""
     route = route_task(args.task_type, request, args.implementer)
     write_json(run_dir / "route.json", route)
-    budget = AgentCallBudget(args.max_agent_calls)
+    budget = AgentCallBudget.for_run(args.max_agent_calls, run_dir, dry_run=args.dry_run)
 
     base_values = {
         "REQUEST": request,
@@ -57,6 +57,10 @@ def run_routed_workflow(args: Namespace, config: Config, request: str, run_dir: 
 
         if args.read_only or route["task_type"] in {"docs", "review"}:
             return run_docs_route(args, config, common, budget, run_dir)
+
+        if not args.dry_run and result_status(validation, "REVIEW_STATUS") != "approved":
+            write_text(run_dir / "final_report.md", "Implementation blocked: plan validation did not approve.\n")
+            return 1
 
         if approval_required(args, route, request):
             write_checkpoint(run_dir, request=request, config=config, route=route, args=args)
@@ -89,6 +93,9 @@ def resume_routed_workflow(args: Namespace, config: Config) -> int:
         raise SystemExit(f"No checkpoint.json in {run_dir}; cannot resume.")
 
     checkpoint = json.loads(read_text(checkpoint_path))
+    for key in ("max_agent_calls", "max_review_rounds"):
+        if key not in getattr(args, "_explicit_options", ()) and key in checkpoint:
+            setattr(args, key, checkpoint[key])
     if not args.workspace:
         config.workspace = Path(checkpoint["workspace"])
     if not config.workspace.exists():
@@ -114,7 +121,13 @@ def resume_routed_workflow(args: Namespace, config: Config) -> int:
         "CLAUDE_ARCHITECTURE": architecture,
         "CODEX_VALIDATION": validation,
     }
-    budget = AgentCallBudget(args.max_agent_calls)
+    budget = AgentCallBudget.for_run(args.max_agent_calls, run_dir, dry_run=args.dry_run)
+
+    if args.read_only:
+        return run_docs_route(args, config, common, budget, run_dir)
+    if not args.dry_run and result_status(validation, "REVIEW_STATUS") != "approved":
+        write_text(run_dir / "final_report.md", "Implementation blocked: plan validation did not approve.\n")
+        return 1
 
     if not args.dry_run:
         ok, git_message = git_baseline_status(config.workspace)

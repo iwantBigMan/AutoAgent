@@ -9,10 +9,13 @@ docs/review/test/infra 노드는 skip하며 리포트에 미실행으로 명시�
 from __future__ import annotations
 
 import dataclasses
+import copy
 import json
 import subprocess
 import threading
 import time
+import re
+import uuid
 from argparse import Namespace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -22,7 +25,7 @@ from autoagent.artifacts import read_text, write_json, write_text
 from autoagent.config import Config
 from autoagent.routing import route_task
 from autoagent.runner import AgentCallBudget, AgentCallBudgetStopped
-from autoagent.safety import git_baseline_status
+from autoagent.safety import git_baseline_status, result_status
 from autoagent.workflows.routed_common import block_implementation, run_evaluation, run_final_report
 from autoagent.workflows.routed_impl import run_impl_review_fix
 
@@ -50,6 +53,13 @@ def topological_waves(tasks: list[dict[str, Any]]) -> list[list[str]]:
     한 파도 = 아직 미완이며 모든 의존성이 done이거나 이전 파도에서 처리된 노드들.
     파도 내부 순서는 입력 tasks 순서를 보존해 결정론적이다. 순환 의존이면 CyclicGraphError.
     """
+    ids = [t.get("id") for t in tasks]
+    if any(not isinstance(nid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", nid) for nid in ids):
+        raise CyclicGraphError("Invalid task id; use a single alphanumeric path segment.")
+    if len(ids) != len(set(ids)):
+        raise CyclicGraphError("Duplicate task ids are not allowed.")
+    if any(dep not in ids for t in tasks for dep in (t.get("dependencies") or [])):
+        raise CyclicGraphError("Unknown task dependency.")
     by_id = {t.get("id"): t for t in tasks}
     done: set[str] = {t.get("id") for t in tasks if t.get("status") == "done"}
     remaining = [t.get("id") for t in tasks if t.get("id") not in done]
@@ -100,7 +110,7 @@ def load_exec_state(run_dir: Path, config: Config) -> dict[str, Any]:
     path = run_dir / "exec_state.json"
     if path.exists():
         return json.loads(read_text(path))
-    stamp = time.strftime("%Y%m%d_%H%M%S")
+    stamp = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:8]
     # baseline은 실제 SHA로 고정한다. 재개 사이 타깃 HEAD가 이동해도 레인이 최초 baseline에서 분기.
     baseline_sha = "HEAD"
     proc = subprocess.run(
@@ -132,7 +142,14 @@ def _node_common(config: Config, node: dict[str, Any], route: dict[str, Any],
     # run_impl_review_fix가 프롬프트 렌더에 쓰는 공용 값. routed의 base_values/common 규약과 동일.
     # codex_final.md 등이 요구하는 CLAUDE_CONTEXT/CLAUDE_ARCHITECTURE/CODEX_VALIDATION도 채운다.
     return {
-        "REQUEST": request,
+        "REQUEST": (
+            f"Overall goal (context only): {request}\n\n"
+            f"Implement ONLY task {node.get('id')}: {node.get('title', '')}\n"
+            f"{node.get('description', '')}\n\n"
+            "Approved file scope (an empty allowed_paths list allows no changes):\n"
+            + json.dumps({key: node.get(key) or [] for key in
+                          ("allowed_paths", "blocked_paths", "expected_files")}, ensure_ascii=False)
+        ),
         "WORKSPACE": str(config.workspace),
         "TASK_TYPE": route["task_type"],
         "ROUTE_JSON": json.dumps(route, ensure_ascii=False, indent=2),
@@ -169,20 +186,31 @@ def run_node(
     node_config = dataclasses.replace(config, workspace=worktree_path)
     common = _node_common(node_config, node, route, goal, args.max_review_rounds)
 
+    if args.read_only and not args.dry_run:
+        write_text(node_out / "node_blocked.md", "Read-only execution cannot implement a task.\n")
+        return "blocked"
+
     if not args.dry_run:
         branch = f"aa/{stamp}/{node_id}"
         # git worktree add는 .git 인덱스를 잠그므로 병렬 레인 간 직렬화한다(crit 3).
         with _GIT_LOCK:
-            # 멱등 재-add(crit 4): pending 노드 재개 시 이전 partial worktree/브랜치를
-            # 깨끗이 폐기하고 새로 만든다(done 노드는 waves에서 제외돼 재-add 대상 아님).
+            # 재개 시 기존 부분 작업은 보존한다. 이미 준비된 의존 입력을 다시 병합하지 않는다.
             if worktree_path.exists():
-                wt.remove_worktree(config.workspace, worktree_path)
-            # prune으로 stale worktree 등록을 정리(경로가 사라졌어도 등록이 남을 수 있음).
-            subprocess.run(["git", "-C", str(config.workspace), "worktree", "prune"],
-                           capture_output=True, text=True, encoding="utf-8", errors="replace")
-            if wt.branch_exists(config.workspace, branch):
-                wt.delete_branch(config.workspace, branch)
-            wt.add_worktree(config.workspace, worktree_path, branch, baseline)
+                actual = wt._git(worktree_path, "symbolic-ref", "--short", "HEAD")
+                if actual.returncode or actual.stdout.strip() != branch:
+                    write_text(node_out / "node_failed.md", "Existing worktree does not match the task branch.\n")
+                    return "blocked"
+            else:
+                wt.attach_or_add_worktree(config.workspace, worktree_path, branch, baseline)
+            input_state = node_out / "input_state.json"
+            if not input_state.exists():
+                for dep in node.get("dependencies") or []:
+                    merged = wt.merge_branch(worktree_path, f"aa/{stamp}/{dep}")
+                    if not merged.ok:
+                        write_text(node_out / "node_failed.md", merged.message)
+                        return "blocked"
+                head = wt._git(worktree_path, "rev-parse", "HEAD")
+                write_json(input_state, {"dependencies": node.get("dependencies") or [], "head": head.stdout.strip()})
 
     try:
         implementation, review, fix, resolved, stopped = run_impl_review_fix(
@@ -197,7 +225,27 @@ def run_node(
         write_text(node_out / "node_failed.md", f"노드 {node_id} 실행 실패: {exc}\n")
         return "failed"
 
+    if stopped:
+        return "stopped"
+    implementation_status = result_status(implementation, "IMPLEMENTATION_STATUS") or result_status(implementation, "FIX_STATUS")
+    if not args.dry_run and implementation_status != "completed":
+        write_text(node_out / "node_failed.md", "Implementation did not report completed.\n")
+        return "failed"
     if not args.dry_run:
+        # 마지막 수정본까지 독립 리뷰를 통과해야 커밋/의존 task를 허용한다.
+        from autoagent.workflows.routed_impl import run_final_review
+        try:
+            final_review = run_final_review(
+                args=args, config=node_config, common=common, route=route, request=goal,
+                budget=budget, run_dir=node_out, implementation=implementation, review=review, fix=fix,
+            )
+        except AgentCallBudgetStopped:
+            return "budget_stopped"
+        except SystemExit:
+            return "failed"
+        if result_status(final_review, "FINAL_STATUS") != "approved":
+            write_text(node_out / "node_failed.md", "Final review did not approve the task.\n")
+            return "failed"
         # git add/commit도 인덱스를 잠그므로 직렬화한다(crit 3).
         with _GIT_LOCK:
             # 커밋 단계 재배치(imp 5): (a) git add -A → (b) scope 검사(staged) → (c) commit.
@@ -210,7 +258,7 @@ def run_node(
                 write_text(node_out / "commit_failed.md",
                            f"노드 {node_id} git add 실패:\n{add_proc.stderr.strip() or add_proc.stdout.strip()}\n")
                 return "failed"
-            # soft scope 가드: allowed_paths 밖/blocked_paths 안 변경을 플래그(차단 아님).
+            # 승인 범위를 벗어난 변경은 커밋 전에 차단한다.
             violations = wt.scope_violations(
                 config.workspace, worktree_path,
                 node.get("allowed_paths") or [], node.get("blocked_paths") or [],
@@ -218,6 +266,7 @@ def run_node(
             if violations:
                 write_text(node_out / "scope_violations.md",
                            "# scope 위반\n\n" + "\n".join(f"- {v}" for v in violations) + "\n")
+                return "blocked"
             # 레인 브랜치에 커밋(구현 산출을 병합 대상으로 고정). returncode를 검사한다(imp 7).
             commit_proc = subprocess.run(
                 ["git", "-C", str(worktree_path), "commit", "-m", f"aa: node {node_id}"],
@@ -237,7 +286,7 @@ def run_node(
 def _mark_blocked_descendants(run_dir: Path, task_graph: dict[str, Any]) -> None:
     # 실제 failed/미완 노드에 (직간접) 의존하는 미완 노드를 blocked로 표시한다.
     tasks = task_graph.get("tasks", [])
-    bad = {t.get("id") for t in tasks if t.get("status") in {"failed", "in_progress"}}
+    bad = {t.get("id") for t in tasks if t.get("status") in {"failed", "in_progress", "stopped", "blocked"}}
     changed = True
     while changed:
         changed = False
@@ -285,21 +334,22 @@ def _integrate_and_cleanup(
         return False, integration_branch
 
     # 통합 worktree를 baseline에서 만들고 그 안에서 순차 병합(레인 브랜치를 위상 순으로).
-    wt.create_integration_branch(config.workspace, integration_branch, baseline)
     integ_wt = run_dir / "worktrees" / "_integration"
-    proc = subprocess.run(
-        ["git", "-C", str(config.workspace), "worktree", "add", str(integ_wt), integration_branch],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    if proc.returncode != 0:
+    try:
+        if not integ_wt.exists():
+            wt.attach_or_add_worktree(config.workspace, integ_wt, integration_branch, baseline)
+        actual = wt._git(integ_wt, "symbolic-ref", "--short", "HEAD")
+        if actual.returncode or actual.stdout.strip() != integration_branch:
+            raise SystemExit("Existing integration worktree has a different branch.")
+    except SystemExit as exc:
         write_text(run_dir / "integration_report.md",
-                   f"# 통합 worktree 생성 실패\n\n{proc.stderr.strip() or proc.stdout.strip()}\n")
+                   f"# 통합 worktree 생성 실패\n\n{exc}\n")
         return False, integration_branch
 
     merged: list[str] = []
-    done_ids = [t.get("id") for t in tasks
-                if t.get("status") == "done"
-                and ("backend" if t.get("type") == "db" else t.get("type")) in CODE_NODE_TYPES]
+    # 상태를 pending으로 복사해 원래 의존 순서를 다시 계산한다.
+    order = [nid for wave in topological_waves([{**t, "status": "pending"} for t in tasks]) for nid in wave]
+    done_ids = [nid for nid in order if any(t["id"] == nid and t.get("status") == "done" for t in tasks)]
     for node_id in done_ids:
         result = wt.merge_branch(integ_wt, f"aa/{stamp}/{node_id}")
         if not result.ok:
@@ -326,8 +376,8 @@ def _cleanup_lanes(config: Config, run_dir: Path, tasks: list[dict[str, Any]], s
         if ("backend" if t.get("type") == "db" else t.get("type")) not in CODE_NODE_TYPES:
             continue
         node_id = t.get("id")
-        wt.remove_worktree(config.workspace, run_dir / "worktrees" / str(node_id))
-        wt.delete_branch(config.workspace, f"aa/{stamp}/{node_id}")
+        if wt.remove_worktree(config.workspace, run_dir / "worktrees" / str(node_id)):
+            wt.delete_branch(config.workspace, f"aa/{stamp}/{node_id}")
     wt.remove_worktree(config.workspace, run_dir / "worktrees" / "_integration")
 
 
@@ -345,10 +395,9 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
             if not args.workspace and checkpoint.get("workspace"):
                 config.workspace = Path(checkpoint["workspace"])
             # 재개 시 예산/라운드 정합화(minor 8): args가 cli 기본값이면 checkpoint 값을 쓴다.
-            if not args.max_agent_calls and checkpoint.get("max_agent_calls"):
-                args.max_agent_calls = int(checkpoint["max_agent_calls"])
-            if args.max_review_rounds is None and checkpoint.get("max_review_rounds") is not None:
-                args.max_review_rounds = int(checkpoint["max_review_rounds"])
+            for key in ("max_agent_calls", "max_review_rounds"):
+                if key not in getattr(args, "_explicit_options", ()) and key in checkpoint:
+                    setattr(args, key, checkpoint[key])
         # checkpoint 복원 후에도 workspace가 None이면(config/env에도 없고 checkpoint에도
         # 없던 경우) 여기서 안내 후 종료한다. cli.require_workspace와 동일 메시지 -
         # cli.py가 이 모듈을 최상단에서 import하므로 순환 import를 피하기 위해 인라인한다.
@@ -362,7 +411,17 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
             raise SystemExit(f"Workspace does not exist: {config.workspace}")
 
         task_graph = load_task_graph(run_dir)
+        if args.dry_run:
+            task_graph = copy.deepcopy(task_graph)
         tasks = task_graph.get("tasks", []) or []
+        progress_path = run_dir / "integration_progress.json"
+        progress = json.loads(read_text(progress_path)) if progress_path.exists() else {}
+        if progress.get("complete") and not args.dry_run:
+            print(f"Task graph execution already complete: {run_dir}")
+            return 0
+        if args.read_only and not args.dry_run:
+            write_text(run_dir / "final_report.md", "Read-only mode: task implementation was not started.\n")
+            return 0
 
         # baseline 안전 확인: 타깃 워킹트리가 커밋된 HEAD를 가져야 격리 worktree가 깨끗하다.
         if not args.dry_run:
@@ -383,7 +442,13 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
             write_text(run_dir / "path_overlap_warnings.md",
                        "# allowed_paths 겹침 경고\n\n" + "\n".join(f"- {w}" for w in overlaps) + "\n")
 
-        budget = AgentCallBudget(args.max_agent_calls)
+        budget = AgentCallBudget.for_run(args.max_agent_calls, run_dir, dry_run=args.dry_run)
+
+        def update_node(node_id, status):
+            if args.dry_run:
+                next(t for t in tasks if t["id"] == node_id)["status"] = status
+            else:
+                set_status(run_dir, task_graph, node_id, status)
 
         # 실행상태 영속(crit 2 + minor 9): stamp·baseline_sha를 재개 사이 재사용한다.
         # dry-run은 git이 없으므로 stamp만 확정하고 baseline은 리터럴로 둔다(산출물 무영향).
@@ -405,22 +470,29 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
                 futures = {}
                 for node_id in wave:
                     node = by_id[node_id]
-                    set_status(run_dir, task_graph, node_id, "in_progress")
+                    if any(by_id[dep].get("status") != "done" for dep in node.get("dependencies") or []):
+                        results[node_id] = "blocked"
+                        continue
+                    update_node(node_id, "in_progress")
                     futures[pool.submit(
                         run_node, args=args, config=config, task_graph=task_graph,
                         node=node, budget=budget, run_dir=run_dir, stamp=stamp, baseline=baseline,
                     )] = node_id
                 for fut, node_id in futures.items():
-                    results[node_id] = fut.result()  # run_node가 예외를 삼켜 문자열로 반환
+                    try:
+                        results[node_id] = fut.result()
+                    except (Exception, SystemExit) as exc:
+                        write_text(run_dir / "nodes" / node_id / "node_failed.md", str(exc))
+                        results[node_id] = "failed"
             for node_id, status in results.items():
                 if status in {"done", "skipped"}:
-                    set_status(run_dir, task_graph, node_id, status)
+                    update_node(node_id, status)
                 elif status == "budget_stopped":
                     # 예산 소진 노드는 pending으로 되돌려 재개 대상으로 남긴다(스펙 §113).
-                    set_status(run_dir, task_graph, node_id, "pending")
+                    update_node(node_id, "pending")
                     budget_stopped = True
                 else:  # "failed"
-                    set_status(run_dir, task_graph, node_id, "failed")
+                    update_node(node_id, status)
                     failed = True
             if failed:
                 break  # 실제 실패면 안전편향 정지: 다음 파도 시작 안 함(barrier에서 멈춤).
@@ -435,6 +507,8 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
         if failed:
             _mark_blocked_descendants(run_dir, task_graph)
 
+        failed = failed or any(t.get("status") not in {"done", "pending"} for t in tasks)
+
         integrated, integration_branch = _integrate_and_cleanup(
             args, config, run_dir, tasks, stamp, baseline, failed, budget_stopped,
         )
@@ -443,7 +517,7 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
                        "# Task Graph 실행 정지\n\n통합하지 못했습니다. integration_report.md를 보세요.\n"
                        f"worktree/브랜치를 보존합니다: {run_dir / 'worktrees'}\n")
             print(f"Task graph run stopped without integration: {run_dir}")
-            return 0
+            return 1
 
         # 통합 트리에 대해 run 레벨 1회: 최종리뷰(구현자 반대편, 07) → 평가(codex 08) → 최종보고(claude 09).
         integ_wt = run_dir / "worktrees" / "_integration"
@@ -463,24 +537,40 @@ def run_task_graph_execution(args: Namespace, config: Config, run_dir: Path) -> 
         }
 
         from autoagent.workflows.routed_impl import run_final_review  # 지연 import(순환 회피)
-        final_review = run_final_review(
-            args=args, config=integ_config, common=common, route=run_route,
-            request=common["REQUEST"], budget=budget, run_dir=run_dir,
-            implementation="통합 브랜치 트리", review="-", fix="-",
-        )
-        evaluation = run_evaluation(
-            args, integ_config, common, budget, run_dir,
-            name="08_codex_evaluation",
-            implementation="통합 브랜치 트리", review="-", fix="-", final_review=final_review,
-        )
-        final = run_final_report(
-            args, integ_config, common, budget, run_dir,
-            name="09_claude_final_report",
-            implementation="통합 브랜치 트리", review="-", fix="-",
-            final_review=final_review, evaluation=evaluation,
-        )
+        head = wt._git(integ_wt, "rev-parse", "HEAD").stdout.strip()
+        if progress.get("head") != head:
+            progress = {"head": head}
+        if "final_review" not in progress:
+            progress["final_review"] = run_final_review(
+                args=args, config=integ_config, common=common, route=run_route,
+                request=common["REQUEST"], budget=budget, run_dir=run_dir,
+                implementation="통합 브랜치 트리", review="-", fix="-",
+            )
+            write_json(progress_path, progress)
+        final_review = progress["final_review"]
+        if result_status(final_review, "FINAL_STATUS") != "approved":
+            write_text(run_dir / "final_report.md", "Integration final review did not approve.\n" + final_review)
+            return 1
+        if "evaluation" not in progress:
+            progress["evaluation"] = run_evaluation(
+                args, integ_config, common, budget, run_dir, name="08_codex_evaluation",
+                implementation="통합 브랜치 트리", review="-", fix="-", final_review=final_review,
+            )
+            write_json(progress_path, progress)
+        evaluation = progress["evaluation"]
+        if result_status(evaluation, "EVALUATION_STATUS") != "passed":
+            write_text(run_dir / "final_report.md", "Integration evaluation did not pass.\n" + evaluation)
+            return 1
+        if "report" not in progress:
+            progress["report"] = run_final_report(
+                args, integ_config, common, budget, run_dir, name="09_claude_final_report",
+                implementation="통합 브랜치 트리", review="-", fix="-", final_review=final_review, evaluation=evaluation,
+            )
+            write_json(progress_path, progress)
+        final = progress["report"]
         write_text(run_dir / "final_report.md", final)
-
+        progress["complete"] = True
+        write_json(progress_path, progress)
         _cleanup_lanes(config, run_dir, tasks, stamp)
         print(f"Task graph execution complete: {run_dir} (통합 브랜치 {integration_branch})")
         return 0

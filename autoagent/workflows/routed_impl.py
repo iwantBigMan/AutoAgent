@@ -290,9 +290,7 @@ def run_final_review(
     review_agent = route["review_agent"]
     if name is None:
         name = f"07_{review_agent}_final_review"
-    # final-review 역할은 sandbox="configured"라 read_only를 무시하고 config.codex_sandbox를
-    # 그대로 쓴다(codex가 리뷰어일 때만 의미; 현행 동작 보존). claude 리뷰어면 mutating=false라
-    # resolve_role이 permission_mode=plan을 부여한다.
+    # 최종리뷰는 구현 권한을 상속하지 않는 읽기 전용 역할이다.
     roles = load_roles(DEFAULT_CONFIG.parent)
     final_review_role = resolve_role(
         roles["final-review"], config=config, route=route, request=request, agent=review_agent, read_only=args.read_only
@@ -309,7 +307,7 @@ def run_final_review(
         write_text(run_dir / f"{name}_prompt.md", final_review_prompt)
         write_command_artifact(run_dir, name, command_for_agent(config, final_review_role))
         return f"[dry-run: {review_agent} final review output]"
-    command_name = require_command(config.claude_command if review_agent == "claude" else config.codex_command)
+    command_name = require_command(config.claude_command if final_review_role.agent == "claude" else config.codex_command)
     budget.before_call(next_step="final-review", out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
@@ -360,7 +358,7 @@ def run_role_step(
         write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         return dry_output
 
-    command_name = require_command(config.claude_command if agent == "claude" else config.codex_command)
+    command_name = require_command(config.claude_command if resolved.agent == "claude" else config.codex_command)
     budget.before_call(next_step=next_step, out_dir=run_dir, dry_run=args.dry_run)
     result = run_process(
         name=name,
