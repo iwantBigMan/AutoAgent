@@ -67,14 +67,54 @@ EN_IMPL_INTENT_PATTERN = re.compile(
 )
 
 
+# 영문 경계는 \b 대신 영숫자 여부로 본다. \b는 한글도 단어 문자라 "read-only로"를 놓친다.
+# 요청 전체가 검토 전용임을 뜻하는 표현. 구현 동사가 함께 있어도 구현을 막는다.
+REVIEW_ONLY_PATTERN = re.compile(
+    r"(?<![a-z0-9_])(?:review|audit|inspect|analysis)\s+only(?![a-z0-9_])|(?:검토|리뷰|분석)\s*만",
+    re.IGNORECASE,
+)
+# 특정 파일·기능만 제한하는 금지 조건일 수도 있는 표현. 부정되지 않은 구현 동사가
+# 요청에 없을 때만 검토 전용으로 본다("마이그레이션은 수정하지 마세요"가 섞인 구현 요청 보호).
+SCOPED_PROHIBITION_PATTERN = re.compile(
+    r"(?<![a-z0-9_])read[- ]only(?![a-z0-9_])|"
+    r"(?<![a-z0-9_])(?:do not|don't|never)\s+(?:modify|edit|change|implement)(?![a-z0-9_])|"
+    r"확인\s*만|(?:수정|변경|구현|추가|삭제|제거|교체)\s*(?:하지\s*(?:마|말)|금지)|만들지\s*(?:마|말)",
+    re.IGNORECASE,
+)
+# 한국어 구현 동사 바로 뒤의 부정. "수정·삭제하지 말고"처럼 나열된 동사도 함께 부정으로 본다.
+_KO_NEGATION_AFTER = re.compile(
+    r"(?:\s*[·/,]\s*[가-힣]{1,4})*\s*(?:(?:하지|지)\s*(?:마|말|않)|금지)"
+)
+_EN_NEGATION_BEFORE = re.compile(r"\b(?:do not|don't|never|without|not)\s+(?:\w+\s+)?$")
+
+
+def affirmative_impl_intent(request: str) -> bool:
+    """부정되지 않은 구현 동사가 하나라도 있으면 True("구현해주세요"는 True, "구현하지 마세요"만 있으면 False)."""
+    lowered = request.lower()
+    for term in KO_IMPL_INTENT_TERMS:
+        for match in re.finditer(re.escape(term), lowered):
+            if not _KO_NEGATION_AFTER.match(lowered, match.end()):
+                return True
+    for match in EN_IMPL_INTENT_PATTERN.finditer(lowered):
+        if not _EN_NEGATION_BEFORE.search(lowered[max(0, match.start() - 30):match.start()]):
+            return True
+    return False
+
+
+def review_only_intent(request: str) -> bool:
+    """'review only'·'검토만'처럼 요청 전체를 검토 전용으로 지정했는지."""
+    return bool(REVIEW_ONLY_PATTERN.search(request))
+
+
 def read_only_intent(request: str) -> bool:
-    """명시적인 검토 전용/코드 수정 금지 요청을 도메인 점수보다 우선한다."""
-    return bool(re.search(
-        r"\b(?:review|audit|inspect|analysis)\s+only\b|\bread[- ]only\b|"
-        r"\b(?:do not|don't|never)\s+(?:modify|edit|change|implement)\b|"
-        r"(?:검토|리뷰|분석|확인)\s*만|(?:수정|변경|구현)\s*(?:하지\s*마|금지)",
-        request, re.IGNORECASE,
-    ))
+    """요청 전체가 검토 전용인지 판정한다.
+
+    검토 전용 표현이 있으면 True. 금지 조건만 있으면 구현 동사가 모두 부정됐을 때만
+    True로, 범위를 좁히는 금지 조건이 섞인 구현 요청은 구현 라우트에 남긴다.
+    """
+    if review_only_intent(request):
+        return True
+    return bool(SCOPED_PROHIBITION_PATTERN.search(request)) and not affirmative_impl_intent(request)
 
 
 def db_term_count(text: str) -> int:
@@ -111,7 +151,10 @@ def route_task(task_type: str, request: str, requested_implementer: str = "auto"
     db_score = db_term_count(lowered)   # 기존 sum(... in lowered) substring 오발을 토큰 매칭으로 대체
     high_risk_score = sum(1 for term in HIGH_RISK_TERMS if term in lowered)
 
-    if read_only_intent(request) and task_type in {"auto", "backend", "frontend"}:
+    # 명시한 backend/frontend는 탈출구다. 검토 전용 표현이 있을 때만 리뷰로 바꾼다.
+    if (task_type == "auto" and read_only_intent(request)) or (
+        task_type in {"backend", "frontend"} and review_only_intent(request)
+    ):
         route = route_task("review", request, requested_implementer)
         route["reason"] = "Explicit read-only intent; implementation is disabled."
         return route
