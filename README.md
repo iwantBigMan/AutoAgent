@@ -329,7 +329,8 @@ final_report.md
 - `--read-only`는 Codex 샌드박스를 `read-only`로 강제하고 구현 단계를 건너뜁니다.
 - Decompose는 Claude를 `--permission-mode plan`으로, Codex를 `--sandbox read-only`로 실행합니다.
 - 대상 작업공간에 유효한 Git HEAD 베이스라인이 없으면 구현 라우트가 차단됩니다.
-- 하네스는 자동으로 커밋/푸시/업로드하지 않습니다.
+- routed/simple은 자동 커밋하지 않습니다. decompose 실행기는 승인 후 격리 레인의 내부 커밋과
+  통합 merge를 수행합니다. 자동 push/업로드는 하지 않습니다.
 
 ## Decompose 워크플로우
 
@@ -395,6 +396,27 @@ git worktree(레인 브랜치)에서 구현→반대모델 리뷰→수정을 �
 다만 이 실행기는 dry-run·단위·코드리뷰까지만 검증되었고, 라이브 end-to-end 실행은
 아직 확인되지 않았습니다.
 
+### 실행 안전성과 재개
+
+- routed의 계획·검증·리뷰·평가 역할은 읽기 전용입니다. 구현/수정 역할만 쓰기 권한을 받습니다.
+- `review only`, `do not modify`, `검토만` 같은 명시적 검토 요청은 routed 구현에 진입하지 않습니다.
+- 각 task는 완료된 의존 task의 커밋을 병합한 worktree에서 시작합니다.
+- task 완료에는 명시적 구현 완료, 최종리뷰 승인, 파일 범위 검사 통과가 필요합니다.
+  `allowed_paths`가 비어 있으면 변경을 허용하지 않습니다. 범위 위반은 커밋/통합을 차단합니다.
+  이 검사는 변경 이후 Git diff 검사이며, 파일별 운영체제 접근 통제를 대신하지 않습니다.
+- 지원하지 않는 docs/review/test/infra task는 미실행으로 표시하고 전체 통합을 중단합니다.
+- decompose 실행기는 **격리된 레인에서 내부 커밋 및 통합 merge를 수행합니다**.
+  routed/simple은 자동 커밋하지 않습니다. 어느 경로도 자동 push하지 않습니다.
+- `execution_context.json`은 원래 절대 workspace·프로젝트·정책을 보존합니다.
+  `agent_budget.json`의 사용량은 재개 후에도 누적됩니다. `--max-agent-calls 12`로 재개하면
+  추가 12회가 아니라 **예산 대상 호출의 누적 상한 12회**입니다.
+  기존 refine/OpenAPI 계획 및 decompose 분해·계획 검토 호출은 이 예산에 포함되지 않습니다.
+- `--resume <run_dir> --dry-run` 결과는 `previews/preview_NNN/`에 격리됩니다.
+  원본 승인/task 완료 상태를 바꾸지 않습니다.
+- 통합 이후 예산 정지는 `integration_progress.json`으로 이어갑니다. 완료한 최종리뷰를
+  다시 호출하지 않으며, 완료되지 않은 worktree를 강제로 삭제하지 않습니다.
+- 동일 run을 여러 프로세스에서 동시에 재개하는 것은 지원하지 않습니다.
+
 ## 출력
 
 각 실행은 다음 아래에 산출물을 씁니다:
@@ -449,6 +471,12 @@ HTML 리포트를 냅니다. seed 직후 `01_openapi_plan` 스테이지(Claude l
 OpenAPI 카탈로그에서 수집계획을 내면 하네스가 실행해 `openapi/*.json`(또는 `.xml`) 스냅샷과
 `openapi_manifest.json`을 남깁니다.
 
+심화 승인 후 `--resume`는 승인된 pass만 이어가며, 새 pass에서는 모든 조사 단계를 다시 실행합니다.
+시장·CSV·출처 검증 결과는 도출과 최종 보고서 모두에 포함됩니다. CSV/출처 검증 근거가 없거나
+파싱되지 않으면 성공으로 처리하지 않습니다. CSV가 없는 요청은 현재 c 단계에서 차단될 수 있습니다.
+일반 CSV 정제의 작업 디렉터리는 `runs/<run>/data/<stage>/`이며 원본 프로젝트는 수정 대상이 아닙니다.
+`--read-only`는 CSV 정제에도 쓰기 권한을 주지 않습니다. dry-run 보고서의 결과는 실제 검증 결과가 아닙니다.
+
 ### 공공데이터(data.go.kr) OpenAPI 수집
 
 - **키 설정**: `autoagent.config.json`의 `data_go_kr_service_key` > env `DATA_GO_KR_SERVICE_KEY`
@@ -480,4 +508,4 @@ Copy-Item C:\Users\systran\Desktop\AutoAgent\commands\aa.md $HOME\.claude\comman
 /aa backend <요청>         # 타입 강제 (auto|backend|frontend|docs|review)
 ```
 
-흐름: 현재 프로젝트(`--workspace .`)에 routed 워크플로우 실행 → high-risk/db면 게이트에서 계획·위험을 요약해 CLI에서 승인 질의 → 승인 시 `--resume`로 구현 단계 진입 → 구현 산출물 + `git diff --stat` 요약. 하네스는 자동 커밋/푸시하지 않으므로 diff는 사람이 검토합니다. 저위험 변경은 게이트 없이 바로 진행됩니다.
+흐름: 현재 프로젝트(`--workspace .`)에 routed 워크플로우 실행 → high-risk/db면 게이트에서 계획·위험을 요약해 CLI에서 승인 질의 → 승인 시 `--resume`로 구현 단계 진입 → 구현 산출물 + `git diff --stat` 요약. routed는 자동 커밋/푸시하지 않으므로 diff는 사람이 검토합니다. 저위험 변경은 게이트 없이 바로 진행됩니다.

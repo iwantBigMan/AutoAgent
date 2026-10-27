@@ -2,7 +2,7 @@
 
 decompose 병렬 실행기가 쓰는 순수 git 조작만 담당한다(오케스트레이션은 task_exec가).
 worktree 추가/제거, 레인 브랜치 삭제, 통합 브랜치 생성/병합, allowed_paths 겹침 경고,
-git diff 기반 soft scope 가드를 제공한다. 자동 충돌 해결·하드 샌드박스는 범위 밖.
+git diff 기반 커밋 전 scope 가드를 제공한다. 자동 충돌 해결·하드 샌드박스는 범위 밖.
 """
 from __future__ import annotations
 
@@ -50,18 +50,20 @@ def scope_violations(target: Path, worktree: Path, allowed: list[str], blocked: 
     # git diff --cached는 신규(untracked) 파일도 staged로 잡으므로, 커밋 전 신규 파일 스코프 검사가 유효하다(imp 5).
     # (git diff HEAD는 untracked 신규 파일을 누락한다.)
     proc = subprocess.run(
-        ["git", "-C", str(worktree), "diff", "--cached", "--name-only"],
+        ["git", "-C", str(worktree), "diff", "--cached", "--no-renames", "--name-only", "-z"],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
-    changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    if proc.returncode != 0:
+        return ["Scope check failed: " + proc.stderr.strip()]
+    changed = [path for path in proc.stdout.split("\0") if path]
     violations: list[str] = []
     for path in changed:
         # blocked 우선: blocked 패턴에 걸리면 무조건 위반.
         if any(fnmatch.fnmatch(path, pat) for pat in (blocked or [])):
             violations.append(f"blocked 경로 변경: {path}")
             continue
-        # allowed가 지정됐는데 어느 패턴에도 안 맞으면 범위 밖 변경.
-        if allowed and not any(fnmatch.fnmatch(path, pat) for pat in allowed):
+        # 빈 allowed는 허용 없음. 어느 패턴에도 안 맞으면 범위 밖 변경.
+        if not any(fnmatch.fnmatchcase(path, pat) for pat in allowed):
             violations.append(f"allowed 밖 변경: {path}")
     return violations
 
@@ -73,11 +75,20 @@ def add_worktree(target: Path, path: Path, branch: str, baseline: str) -> None:
         raise SystemExit(f"worktree add 실패({branch}): {proc.stderr.strip() or proc.stdout.strip()}")
 
 
-def remove_worktree(target: Path, path: Path) -> None:
-    # 성공 정리용. Windows 잠금 등으로 실패하면 --force로 한 번 더 시도한다.
+def attach_or_add_worktree(target: Path, path: Path, branch: str, baseline: str) -> None:
+    """재개 브랜치는 재사용하고, 신규 브랜치만 기준 커밋에서 생성한다."""
+    if not branch_exists(target, branch):
+        add_worktree(target, path, branch, baseline)
+        return
+    proc = _git(target, "worktree", "add", str(path), branch)
+    if proc.returncode:
+        raise SystemExit(proc.stderr.strip() or proc.stdout.strip())
+
+
+def remove_worktree(target: Path, path: Path) -> bool:
+    # 정리 실패 시 작업을 보존한다. 미커밋 파일을 --force로 삭제하지 않는다.
     proc = _git(target, "worktree", "remove", str(path))
-    if proc.returncode != 0:
-        _git(target, "worktree", "remove", "--force", str(path))
+    return proc.returncode == 0
 
 
 def delete_branch(target: Path, branch: str) -> None:

@@ -52,7 +52,7 @@ def run_preamble(
         write_command_artifact(run_dir, "01_claude_context", command_for_agent(config, context_role))
         context = "[dry-run: Claude context output]"
     else:
-        claude = require_command(config.claude_command)
+        claude = require_command(config.claude_command if context_role.agent == "claude" else config.codex_command)
         budget.before_call(next_step="context", out_dir=run_dir, dry_run=args.dry_run)
         context = run_process(
             name="01_claude_context",
@@ -92,7 +92,7 @@ def run_preamble(
             write_text(run_dir / f"{name}_prompt.md", prompt)
             write_command_artifact(run_dir, name, command_for_agent(config, architect_role))
             return "[dry-run: Claude architecture output]"
-        claude = require_command(config.claude_command)
+        claude = require_command(config.claude_command if architect_role.agent == "claude" else config.codex_command)
         budget.before_call(next_step="architecture", out_dir=run_dir, dry_run=args.dry_run)
         result = run_process(
             name=name,
@@ -119,7 +119,7 @@ def run_preamble(
             write_text(run_dir / f"{name}_prompt.md", prompt)
             write_command_artifact(run_dir, name, command_for_agent(config, validation_role))
             return "[dry-run: Codex validation output]"
-        codex = require_command(config.codex_command)
+        codex = require_command(config.claude_command if validation_role.agent == "claude" else config.codex_command)
         budget.before_call(next_step="validation", out_dir=run_dir, dry_run=args.dry_run)
         result = run_process(
             name=name,

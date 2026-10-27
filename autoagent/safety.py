@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import subprocess
+import json
+import re
 from pathlib import Path
 
 
@@ -63,3 +65,19 @@ def review_needs_changes(review: str) -> bool:
         return False
     fallback_markers = ["needs changes", "must fix", "blocking", "blocker", "critical", "수정 필요"]
     return any(marker in lowered for marker in fallback_markers)
+
+
+def result_status(text: str, prefix: str) -> str | None:
+    """명시적 결과 마커/JSON만 해석하며 알 수 없는 결과를 성공으로 추정하지 않는다."""
+    matches = re.findall(r"^\s*" + re.escape(prefix) + r":\s*([a-z_]+)\s*$", text, re.M | re.I)
+    if matches:
+        values = {value.lower() for value in matches}
+        return values.pop() if len(values) == 1 else None
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.I)
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return str(data.get("status", "")).lower() if isinstance(data, dict) else None

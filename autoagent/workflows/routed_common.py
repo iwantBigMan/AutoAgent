@@ -137,7 +137,7 @@ def run_evaluation(
         write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         evaluation = "[dry-run: Codex evaluation output]"
     else:
-        codex = require_command(config.codex_command)
+        codex = require_command(config.claude_command if resolved.agent == "claude" else config.codex_command)
         budget.before_call(next_step="evaluation", out_dir=run_dir, dry_run=args.dry_run)
         evaluation = run_process(
             name=name,
@@ -190,7 +190,7 @@ def run_final_report(
         write_command_artifact(run_dir, name, command_for_agent(config, resolved))
         return "[dry-run: final report output]"
 
-    claude = require_command(config.claude_command)
+    claude = require_command(config.claude_command if resolved.agent == "claude" else config.codex_command)
     budget.before_call(next_step="report", out_dir=run_dir, dry_run=args.dry_run)
     return run_process(
         name=name,

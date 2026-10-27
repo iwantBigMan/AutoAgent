@@ -22,6 +22,7 @@ run_stage_loop("c", ...)를 _run_agent_step monkeypatch로 몰아서, 검증기 
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from autoagent.config import load_config
@@ -29,8 +30,7 @@ from autoagent.artifacts import DEFAULT_CONFIG
 from autoagent.runner import AgentCallBudget
 from autoagent.workflows import research as R
 
-# c 리서처(codex)가 내는 DATA_QUALITY_OUTPUT stdout. cleaned_files를 비워 파일 IO 없이
-# run_data_quality가 즉시 pass로 재계산하게 한다(코드 검증 경로 자체의 배선만 확인 목적).
+# Missing CSV evidence must block, not silently pass.
 _C_RESEARCHER_OUT = (
     "DATA_QUALITY_OUTPUT\n```json\n"
     '{"cleaned_files":[],"transform_manifest":{"steps":[]},'
@@ -59,11 +59,20 @@ def test_c_stage_uses_code_verifier_not_crossmodel_model_call(tmp_path: Path, mo
     verify가 data_quality 어댑터로 불려 verdict.adapter == "data_quality"가 된다.
     """
     verifier_role_calls: list[str] = []
+    source = tmp_path / "source.csv"
+    cleaned = tmp_path / "cleaned.csv"
+    source.write_text("name,value\na,1\nb,2\n", encoding="utf-8")
+    cleaned.write_bytes(source.read_bytes())
+    output = json.dumps({
+        "cleaned_files": [{"path": str(cleaned), "source_dump_path": str(source)}],
+        "transform_manifest": {"steps": []}, "derived_claims": [],
+        "schema_expectations": {"value": "int"}, "sanity_rules": {},
+    })
 
     def fake_agent_step(ctx, *, agent, role_id, name, prompt_name, prompt_values, next_step, dry_output):
         if role_id == "verifier":
             verifier_role_calls.append(agent)  # 이 리스트가 채워지면 안 됨(코드 검증 경로 위반)
-        return _C_RESEARCHER_OUT
+        return "DATA_QUALITY_OUTPUT\n```json\n" + output + "\n```\n"
 
     monkeypatch.setattr(R, "_run_agent_step", fake_agent_step)
 

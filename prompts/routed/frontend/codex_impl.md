@@ -52,3 +52,11 @@
 - 스스로 고치지 못했거나 판단을 유보한 우려는 결과에 `SELF_REVIEW:` 절로 명시하세요.
 
 이 자체 리뷰는 당신 자신의 점검이며, 독립적인 교차 리뷰는 이후 반대 모델(Claude)이 수행합니다.
+
+# 출력 상태
+
+첫 줄에는 백틱 없이 다음 중 하나를 쓰세요:
+- IMPLEMENTATION_STATUS: completed
+- IMPLEMENTATION_STATUS: partial
+- IMPLEMENTATION_STATUS: blocked
+완료하지 못했거나 검증이 막혔다면 completed로 보고하지 마세요.

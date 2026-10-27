@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from autoagent.artifacts import write_text
+from autoagent.artifacts import write_text, write_json
 from autoagent.config import Config
 
 
@@ -36,7 +36,14 @@ class AgentCallBudgetStopped(Exception):
 class AgentCallBudget:
     max_agent_calls: int
     used_agent_calls: int = 0
+    state_path: Path | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    @classmethod
+    def for_run(cls, max_agent_calls: int, run_dir: Path, *, dry_run: bool = False):
+        path = run_dir / "agent_budget.json"
+        used = json.loads(path.read_text(encoding="utf-8")).get("used_agent_calls", 0) if path.exists() else 0
+        return cls(max_agent_calls, int(used), None if dry_run else path)
 
     def before_call(self, *, next_step: str, out_dir: Path, dry_run: bool) -> None:
         # 매 에이전트 호출 직전에 부른다. dry_run은 실제 호출이 아니므로 카운트/체크하지 않는다.
@@ -56,6 +63,11 @@ class AgentCallBudget:
                 )
                 raise AgentCallBudgetStopped(next_step, out_dir)
             self.used_agent_calls += 1
+            if self.state_path is not None:
+                write_json(self.state_path, {
+                    "used_agent_calls": self.used_agent_calls,
+                    "max_agent_calls": self.max_agent_calls,
+                })
 
 
 def claude_command(

@@ -75,6 +75,10 @@ def markdown_to_html(md: str) -> str:
         while i < n and lines[i].strip() and not lines[i].strip().startswith(("#", "|", "- ")):
             para.append(lines[i].strip())
             i += 1
+        if not para:
+            # 미지원 heading/표 조각도 최소 한 줄 소비해 진행을 보장한다.
+            para.append(lines[i].strip())
+            i += 1
         out.append(f"<p>{_inline(' '.join(para))}</p>")
     return "\n".join(out)
 

@@ -62,7 +62,15 @@ def parse_grounding_verdict(raw_text: str) -> dict[str, Any]:
         data = _extract_grounding_json(raw_text)
     except Exception:  # noqa: BLE001 — JSON 부재/파싱실패 모두 방어값으로
         data = {}
+    if not isinstance(data, dict):
+        data = {}
+    valid = bool(marker) and isinstance(data.get("verdict"), str) and data.get("verdict") in {"pass", "needs_changes", "blocked"} and isinstance(data.get("claim_checks"), list)
+    valid = valid and data.get("verdict") == verdict
+    valid = valid and all(isinstance(check, dict) for check in data.get("claim_checks", []))
+    if not valid:
+        data = {}
     return {
+        "valid": valid,
         "verdict": data.get("verdict", verdict),
         "claim_checks": data.get("claim_checks", []),
         "orphan_claims": data.get("orphan_claims", []),
@@ -125,6 +133,24 @@ def merge_and_recompute(
     """
     findings = list(det.findings) + _model_findings(model_json)
     status = _recompute_status(findings, det)
+    checks = model_json.get("claim_checks", [])
+    claims = stage_out.get("claims", [])
+    valid = model_json.get("valid", True) and model_json.get("verdict") in {"pass", "needs_changes", "blocked"}
+    if not valid or model_json.get("verdict") == "blocked" or not claims:
+        status = "blocked"
+        findings.append(Finding(severity="critical", category="invalid_verdict",
+                                detail="Missing claims or invalid/blocked semantic verification.",
+                                fix_directive="Return a valid verdict and checks for every claim."))
+    else:
+        checked = {c.get("claim_id") for c in checks if c.get("grounding") in
+                   {"supported", "partially_supported", "contradicted", "unsupported", "no_source"}}
+        missing = [c.get("id") for c in claims if not c.get("id") or c.get("id") not in checked]
+        if missing or model_json.get("verdict") == "needs_changes":
+            if status != "blocked":
+                status = "needs_changes"
+            if missing:
+                findings.append(Finding(severity="major", category="missing_claim_checks", detail=str(missing),
+                                        fix_directive="Verify every claim explicitly; omitted checks cannot pass."))
     raw = {
         "adapter": "source_grounding", "stage_id": stage_id,
         "model_verdict": model_json.get("verdict"), "recomputed_status": status,

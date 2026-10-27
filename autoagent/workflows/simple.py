@@ -24,7 +24,7 @@ from autoagent.runner import (
 
 
 def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: Path) -> int:
-    budget = AgentCallBudget(args.max_agent_calls)
+    budget = AgentCallBudget.for_run(args.max_agent_calls, run_dir, dry_run=args.dry_run)
     values = {
         "REQUEST": request,
         "WORKSPACE": str(config.workspace),
@@ -42,8 +42,8 @@ def run_simple_workflow(args: Namespace, config: Config, request: str, run_dir: 
         print(f"Dry run written to {run_dir}")
         return 0
 
-    claude = require_command(config.claude_command)
-    codex = require_command(config.codex_command)
+    claude = require_command(solo_cli(config) if config.solo_provider else config.claude_command)
+    codex = claude if config.solo_provider or args.plan_only else require_command(config.codex_command)
 
     try:
         budget.before_call(next_step="plan", out_dir=run_dir, dry_run=args.dry_run)

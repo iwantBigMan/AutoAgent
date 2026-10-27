@@ -342,7 +342,21 @@ def run_data_quality(stage_out: dict[str, Any], run_dir: Path, *, verifier_agent
     schema_expectations = stage_out.get("schema_expectations") or {}
     derived_claims = stage_out.get("derived_claims") or []
 
-    for entry in stage_out.get("cleaned_files") or []:
+    entries = stage_out.get("cleaned_files")
+    if not isinstance(entries, list) or not entries or any(
+        not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or not entry.get("path")
+        or not isinstance(entry.get("source_dump_path"), str) or not entry.get("source_dump_path")
+        for entry in entries
+    ):
+        entries = []
+        has_error = True
+        all_findings.append(Finding(
+            severity="critical", category="missing_artifacts", detail="No valid CSV artifacts to verify.",
+            fix_directive="Provide source and cleaned CSV paths; missing evidence is not a passing result.",
+        ))
+        checks.append({"name": "required_artifacts", "status": "error"})
+
+    for entry in entries:
         cleaned_path = Path(entry.get("path", ""))
         source_path = Path(entry.get("source_dump_path", ""))
         try:

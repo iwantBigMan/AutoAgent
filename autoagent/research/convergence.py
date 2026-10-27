@@ -18,7 +18,7 @@ _WS = re.compile(r"\s+")
 
 def normalize_claim_key(claim: dict) -> str:
     """claim의 안정 key. claim_id가 있으면 그대로, 없으면 정규화 텍스트 sha1(12자)."""
-    cid = claim.get("claim_id")
+    cid = claim.get("claim_id") or claim.get("id")
     if cid:
         return str(cid)
     text = _WS.sub(" ", str(claim.get("text", ""))).strip().lower()
@@ -59,7 +59,7 @@ def diff_verified_claims(prev: list[dict], curr: list[dict]) -> ClaimDelta:
             continue
         if _value_of(c) != _value_of(p):
             contradictions.append(
-                {"claim_id": c.get("claim_id") or key,
+                {"claim_id": c.get("claim_id") or c.get("id") or key,
                  "prev_value": _value_of(p), "curr_value": _value_of(c)}
             )
         else:
